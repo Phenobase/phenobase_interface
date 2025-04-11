@@ -598,18 +598,6 @@ function hideLoader() {
   $(".facet-link").css("pointer-events", "auto"); // Re-enable clicks on facet links
 }
 
-// Call fetchResults when the document is ready
-$(document).ready(function () {
-  fetchResults();
-  $("#downloadButton").click(function (event) {
-    updateDownloadLink();
-    console.log(downloadLink);
-    if (!downloadLink) {
-      event.preventDefault(); // Prevent default action if no link is available
-    }
-  });
-});
-
 // Toggle between Table and Map view
 $("#showTable").click(function () {
   $("#tableContainer").show(); // Show the table container
