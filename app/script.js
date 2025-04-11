@@ -178,6 +178,7 @@ function updateResultsHeading(showingResults, totalResults) {
 
 // Call fetchResults when the document is ready
 $(document).ready(function () {
+  console.log('fetching from ready function')
   fetchResults();
   $("#downloadButton").click(function (event) {
     updateDownloadLink();
@@ -426,6 +427,7 @@ function addFacet(field, value) {
   updateQueryWithSelectedFacets();
 
   // Re-fetch results with the updated query
+  console.log('addFacet')
   fetchResults();
 }
 
@@ -442,6 +444,7 @@ function removeFacet(field, value) {
   updateQueryWithSelectedFacets();
 
   // Re-fetch results with the updated query
+  console.log('removeFacet')
   fetchResults();
 }
 
@@ -500,6 +503,7 @@ function handleScientificNameSearch() {
   updateQueryWithSelectedFacets();
 
   // Fetch results based on the updated query
+  console.log('handleScientificName')
   fetchResults();
 }
 
@@ -524,6 +528,7 @@ function renderPagination(totalResults) {
     prevButton.textContent = 'Previous';
     prevButton.onclick = () => {
       currentPage--;
+	  console.log('renderPagination 1')
       fetchResults(); // Fetch new results for the updated page
     };
     paginationContainer.appendChild(prevButton);
@@ -536,6 +541,7 @@ function renderPagination(totalResults) {
     nextButton.textContent = 'Next';
     nextButton.onclick = () => {
       currentPage++;
+	  console.log('renderPagination 2')
       fetchResults(); // Fetch new results for the updated page
     };
     paginationContainer.appendChild(nextButton);
