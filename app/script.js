@@ -3,7 +3,7 @@ let currentPage = 1;
 const pageSize = 15; // Number of results per page
 
 // API URL with placeholders for pagination
-var apiUrl = `https://biscicol.org/phenobase/api/v1/query//phenobase/_search?size=${pageSize}&from=0`;
+var apiUrl = `https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=${pageSize}&from=0`;
 var queryStringRootURL = "https://biscicol.org/phenobase/api/v1/download/_search?q="; // Root URL for download link
 var downloadLink = ""; // Holds the constructed download link
 
@@ -47,7 +47,7 @@ var requestData = {
     },
     mapped_traits_1: {
       terms: {
-        field: "mapped_traits",
+        field: "mappedTraits",
         size: 500,
       },
     },
@@ -59,7 +59,7 @@ var requestData = {
     },
     basis_of_record_3: {
       terms: {
-        field: "basis_of_record",
+        field: "basisOfRecord",
         size: 50,
       },
     },
@@ -305,7 +305,6 @@ function renderResults(results) {
                 <th>View Details</th>
                 <th>Datasource</th>
                 <th>Scientific Name</th>
-                <th>Taxon Rank</th>
                 <th>Year</th>
                 <th>Day of Year</th>
                 <th>Family</th>
@@ -321,17 +320,16 @@ function renderResults(results) {
       <td class="view-details">
         <i class="fa fa-search view-icon" style="cursor: pointer;" title="View Details" data-source='${JSON.stringify(doc._source)}'></i>
       </td>  
-      <td>${doc._source.datasource}</td>
-      <td>${doc._source.scientific_name}</td>
-      <td>${doc._source.taxon_rank}</td>
+      <td>${doc._source.dataSource}</td>
+      <td>${doc._source.scientificName}</td>
       <td>${doc._source.year}</td>
-      <td>${doc._source.day_of_year}</td>
+      <td>${doc._source.dayOfYear}</td>
       <td>${doc._source.family}</td>
       <td>${doc._source.trait}</td>
-      <td>${doc._source.prediction_class}</td>
+      <td>${doc._source.predictionClass}</td>
       <td>
-        <a href="${doc._source.observed_image_url}" target="_blank">
-          <img src="${doc._source.observed_image_guid}" width="85" height="85" alt="Image">
+        <a href="${doc._source.observedMetadataUrl}" target="_blank">Observation Metadata
+          <!--<img src="${doc._source.observedMetadataUrl}" width="85" height="85" alt="Image">-->
         </a>
       </td>
     </tr>`;
@@ -353,13 +351,13 @@ function renderFacets(aggregations) {
   $("#basisOfRecordFacets").empty();
 
   // Populate DataSource facet
-  renderFacetLinks(aggregations.datasource_0, "#dataSourceFacets", "datasource");
+  renderFacetLinks(aggregations.datasource_0, "#dataSourceFacets", "dataSource");
   // Populate Trait facet
-  renderFacetLinks(aggregations.mapped_traits_1, "#traitFacets", "mapped_traits");
+  renderFacetLinks(aggregations.mapped_traits_1, "#traitFacets", "mappedTraits");
   // Populate Family facet
   renderFacetLinks(aggregations.family_2, "#familyFacets", "family");
   // Populate Basis of Record facet
-  renderFacetLinks(aggregations.basis_of_record_3, "#basisOfRecordFacets", "basis_of_record");
+  renderFacetLinks(aggregations.basis_of_record_3, "#basisOfRecordFacets", "basisOfRecord");
 }
 
 // Helper function to render facet links
@@ -695,7 +693,7 @@ function renderTables(aggregations) {
 
 // Function to fetch stats data from the API using POST request
 function fetchStatsData() {
-  const statsApiUrl = "https://biscicol.org/phenobase/api/v1/query//phenobase/_search?size=15&from=0";
+  const statsApiUrl = "https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=15&from=0";
 
   $.ajax({
     url: statsApiUrl,
