@@ -10,6 +10,12 @@ var downloadLink = ""; // Holds the constructed download link
 // Initialize the Leaflet map
 var map = L.map('map').setView([0, 0], 2); // Default to world view
 
+// ⬇️ add near the top (after selectedFacets or anywhere global)
+const HIDDEN_TRAIT = 'plant structure present';
+function isHiddenTrait(v) {
+  return String(v || '').trim().toLowerCase() === HIDDEN_TRAIT;
+}
+
 // Define different map layers
 const baseLayers = {
   "Regular": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -353,7 +359,7 @@ function renderFacets(aggregations) {
   // Populate DataSource facet
   renderFacetLinks(aggregations.datasource_0, "#dataSourceFacets", "dataSource");
   // Populate Trait facet
-  renderFacetLinks(aggregations.mapped_traits_1, "#traitFacets", "mappedTraits");
+  renderFacetLinks(aggregations.mappedTraits_1, "#traitFacets", "mappedTraits");
   // Populate Family facet
   renderFacetLinks(aggregations.family_2, "#familyFacets", "family");
   // Populate Basis of Record facet
@@ -364,6 +370,9 @@ function renderFacets(aggregations) {
 function renderFacetLinks(aggregation, container, field) {
   if (aggregation && aggregation.buckets) {
     aggregation.buckets.forEach(function (bucket) {
+	   // ⬇️ skip “plant structure present” in the mappedTraits facet
+      if (field === 'mappedTraits' && isHiddenTrait(bucket.key)) return;
+		
       const isSelected = selectedFacets[field] && selectedFacets[field].includes(bucket.key);
       var countFormatted = bucket.doc_count.toLocaleString(); // Format count with commas
       $(container).append(`
@@ -413,7 +422,9 @@ function renderSelectedFacets() {
 
 // Function to add a facet to the selected list and update the query
 function addFacet(field, value) {
-  // Add the selected facet to the selectedFacets object
+    if (field === 'mappedTraits' && isHiddenTrait(value)) return; // ignore hidden trait
+
+	// Add the selected facet to the selectedFacets object
   if (!selectedFacets[field]) {
     selectedFacets[field] = [];
   }
