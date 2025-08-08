@@ -1,6 +1,5 @@
 # About
-[![Netlify Status](https://api.netlify.com/api/v1/badges/9aba2cd4-5eaa-4879-8e51-2c11c26a1719/deploy-status)](https://app.netlify.com/sites/phenobase/deploys)
-
+[![Netlify Status](https://api.netlify.com/api/v1/badges/db775c45-a020-414c-9bba-539bf5de3fcf/deploy-status)](https://app.netlify.com/projects/phenobase2/deploys)
 
 A lightweight interface for visualizing plant phenology, drawing on data that has been indexed using the script at
 [phenobase_data](https://github.com/Phenobase/phenobase_data).  This interface is written
