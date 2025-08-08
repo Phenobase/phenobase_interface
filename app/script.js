@@ -309,8 +309,8 @@ function renderResults(results) {
                 <th>Day of Year</th>
                 <th>Family</th>
                 <th>Trait</th>
-                <th>Prediction Class</th>
-                <th>Image</th>
+                <th>Verbatim Trait</th>
+                <th>Source Observation</th>
             </tr>
         </thead>`;
   table.prepend(thead); // Add <thead> to the table
@@ -326,7 +326,7 @@ function renderResults(results) {
       <td>${doc._source.dayOfYear}</td>
       <td>${doc._source.family}</td>
       <td>${doc._source.trait}</td>
-      <td>${doc._source.predictionClass}</td>
+      <td>${doc._source.verbatimTrait}</td>
       <td>
         <a href="${doc._source.observedMetadataUrl}" target="_blank">Observation Metadata
           <!--<img src="${doc._source.observedMetadataUrl}" width="85" height="85" alt="Image">-->
