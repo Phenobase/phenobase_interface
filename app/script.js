@@ -41,7 +41,7 @@ var requestData = {
   aggs: {
     datasource_0: {
       terms: {
-        field: "datasource",
+        field: "dataSource",
         size: 10,
       },
     },
@@ -57,9 +57,9 @@ var requestData = {
         size: 50,
       },
     },
-    basis_of_record_3: {
+    genus_3: {
       terms: {
-        field: "basisOfRecord",
+        field: "genus",
         size: 50,
       },
     },
@@ -308,9 +308,9 @@ function renderResults(results) {
                 <th>Year</th>
                 <th>Day of Year</th>
                 <th>Family</th>
+                <th>Genus</th>
                 <th>Trait</th>
-                <th>Prediction Class</th>
-                <th>Image</th>
+                <th>Source Record</th>
             </tr>
         </thead>`;
   table.prepend(thead); // Add <thead> to the table
@@ -325,8 +325,8 @@ function renderResults(results) {
       <td>${doc._source.year}</td>
       <td>${doc._source.dayOfYear}</td>
       <td>${doc._source.family}</td>
+      <td>${doc._source.genus}</td>
       <td>${doc._source.trait}</td>
-      <td>${doc._source.predictionClass}</td>
       <td>
         <a href="${doc._source.observedMetadataUrl}" target="_blank">Observation Metadata
           <!--<img src="${doc._source.observedMetadataUrl}" width="85" height="85" alt="Image">-->
@@ -348,7 +348,7 @@ function renderFacets(aggregations) {
   $("#dataSourceFacets").empty();
   $("#traitFacets").empty();
   $("#familyFacets").empty();
-  $("#basisOfRecordFacets").empty();
+  $("#genusFacets").empty();
 
   // Populate DataSource facet
   renderFacetLinks(aggregations.datasource_0, "#dataSourceFacets", "dataSource");
@@ -357,7 +357,7 @@ function renderFacets(aggregations) {
   // Populate Family facet
   renderFacetLinks(aggregations.family_2, "#familyFacets", "family");
   // Populate Basis of Record facet
-  renderFacetLinks(aggregations.basis_of_record_3, "#basisOfRecordFacets", "basisOfRecord");
+  renderFacetLinks(aggregations.genus_3, "#genusFacets", "genus");
 }
 
 // Helper function to render facet links
@@ -685,10 +685,10 @@ function renderTables(aggregations) {
   renderTable("familyTable", familyHeaders, familyRows, "Family Distribution");
 
   // Basis of Record Table
-  const basisOfRecordBuckets = aggregations.basis_of_record_3?.buckets || [];
-  const basisOfRecordHeaders = ["Basis of Record", "Count"];
-  const basisOfRecordRows = basisOfRecordBuckets.map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]);
-  renderTable("basisOfRecordTable", basisOfRecordHeaders, basisOfRecordRows, "Basis of Record Distribution");
+  const genusBuckets = aggregations.genus_3?.buckets || [];
+  const genusHeaders= ["Genus", "Count"];
+  const genusRows= genusBuckets.map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]);
+  renderTable("genusTable", genusHeaders, genusRows, "Genus Distribution");
 }
 
 // Function to fetch stats data from the API using POST request
