@@ -10,6 +10,12 @@ var downloadLink = ""; // Holds the constructed download link
 // Initialize the Leaflet map
 var map = L.map('map').setView([0, 0], 2); // Default to world view
 
+// ⬇️ add near the top (after selectedFacets or anywhere global)
+const HIDDEN_TRAIT = 'plant structure present';
+function isHiddenTrait(v) {
+  return String(v || '').trim().toLowerCase() === HIDDEN_TRAIT;
+}
+
 // Define different map layers
 const baseLayers = {
   "Regular": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -45,7 +51,7 @@ var requestData = {
         size: 10,
       },
     },
-    mapped_traits_1: {
+    mappedTraits_1: {
       terms: {
         field: "mappedTraits",
         size: 500,
@@ -310,6 +316,7 @@ function renderResults(results) {
                 <th>Family</th>
                 <th>Genus</th>
                 <th>Trait</th>
+                <th>Verbatim Trait</th>
                 <th>Source Record</th>
             </tr>
         </thead>`;
@@ -327,6 +334,7 @@ function renderResults(results) {
       <td>${doc._source.family}</td>
       <td>${doc._source.genus}</td>
       <td>${doc._source.trait}</td>
+      <td>${doc._source.verbatimTrait}</td>
       <td>
         <a href="${doc._source.observedMetadataUrl}" target="_blank">Observation Metadata
           <!--<img src="${doc._source.observedMetadataUrl}" width="85" height="85" alt="Image">-->
@@ -353,7 +361,7 @@ function renderFacets(aggregations) {
   // Populate DataSource facet
   renderFacetLinks(aggregations.datasource_0, "#dataSourceFacets", "dataSource");
   // Populate Trait facet
-  renderFacetLinks(aggregations.mapped_traits_1, "#traitFacets", "mappedTraits");
+  renderFacetLinks(aggregations.mappedTraits_1, "#traitFacets", "mappedTraits");
   // Populate Family facet
   renderFacetLinks(aggregations.family_2, "#familyFacets", "family");
   // Populate Basis of Record facet
@@ -364,6 +372,9 @@ function renderFacets(aggregations) {
 function renderFacetLinks(aggregation, container, field) {
   if (aggregation && aggregation.buckets) {
     aggregation.buckets.forEach(function (bucket) {
+	   // ⬇️ skip “plant structure present” in the mappedTraits facet
+      if (field === 'mappedTraits' && isHiddenTrait(bucket.key)) return;
+		
       const isSelected = selectedFacets[field] && selectedFacets[field].includes(bucket.key);
       var countFormatted = bucket.doc_count.toLocaleString(); // Format count with commas
       $(container).append(`
@@ -413,7 +424,9 @@ function renderSelectedFacets() {
 
 // Function to add a facet to the selected list and update the query
 function addFacet(field, value) {
-  // Add the selected facet to the selectedFacets object
+    if (field === 'mappedTraits' && isHiddenTrait(value)) return; // ignore hidden trait
+
+	// Add the selected facet to the selectedFacets object
   if (!selectedFacets[field]) {
     selectedFacets[field] = [];
   }
@@ -492,7 +505,7 @@ function handleScientificNameSearch() {
 
   // Update the scientific name filter
   if (scientificName) {
-    scientificNameFilter = { match: { scientific_name: scientificName } };
+    scientificNameFilter = { match: { scientificName: scientificName } };
   } else {
     scientificNameFilter = null; // Clear the filter if input is empty
   }
@@ -555,11 +568,11 @@ function showDetailsModal(sourceData) {
   // Create a container to hold the image and the details
   var contentContainer = $(`
       <div style="display: flex; flex-wrap: wrap; gap: 20px;">
-          <div style="flex: 0 0 auto;">
+          <!--<div style="flex: 0 0 auto;">
               <a href="${sourceData.observed_image_url}" target="_blank">
                   <img src="${sourceData.observed_image_guid}" width="85" height="85" alt="Image">
               </a>
-          </div>
+          </div>-->
           <div style="flex: 1;">
               <!-- Details will be appended here -->
           </div>
@@ -572,9 +585,9 @@ function showDetailsModal(sourceData) {
   // Append each key-value pair as a paragraph to the details section
   Object.entries(sourceData).forEach(([key, value]) => {
       // Check if the key is for image or link and display them with special formatting if needed
-      if (key === 'observed_image_url' || key === 'observed_image_guid') {
+      if (key === 'observedImageUrl' || key === 'observedImageGuid') {
           // Display these fields specially, e.g., with the image and link already displayed
-          contentContainer.find('div:last-child').append(`<p><strong>${key}:</strong> <a href="${sourceData.observed_image_url}" target="_blank">${value}</a></p>`);
+          contentContainer.find('div:last-child').append(`<p><strong>${key}:</strong> <a href="${sourceData.observedImageUrl}" target="_blank">${value}</a></p>`);
       } else {
           // Add the rest of the details normally
           contentContainer.find('div:last-child').append(`<p><strong>${key}:</strong> ${value}</p>`);
@@ -673,7 +686,7 @@ function renderTables(aggregations) {
   renderTable("datasourceTable", datasourceHeaders, datasourceRows, "Datasource Distribution");
 
   // Mapped Traits Table
-  const mappedTraitsBuckets = aggregations.mapped_traits_1?.buckets || [];
+  const mappedTraitsBuckets = aggregations.mappedTraits_1?.buckets || [];
   const mappedTraitsHeaders = ["Trait", "Count"];
   const mappedTraitsRows = mappedTraitsBuckets.map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]);
   renderTable("mappedTraitsTable", mappedTraitsHeaders, mappedTraitsRows, "Mapped Traits Distribution");
@@ -684,7 +697,7 @@ function renderTables(aggregations) {
   const familyRows = familyBuckets.map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]);
   renderTable("familyTable", familyHeaders, familyRows, "Family Distribution");
 
-  // Basis of Record Table
+  // Genus
   const genusBuckets = aggregations.genus_3?.buckets || [];
   const genusHeaders= ["Genus", "Count"];
   const genusRows= genusBuckets.map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]);
