@@ -335,11 +335,14 @@ function renderResults(results) {
       <td>${doc._source.genus}</td>
       <td>${doc._source.trait}</td>
       <td>${doc._source.verbatimTrait}</td>
-      <td>
-        <a href="${doc._source.observedMetadataUrl}" target="_blank">Observation Metadata
-          <!--<img src="${doc._source.observedMetadataUrl}" width="85" height="85" alt="Image">-->
-        </a>
-      </td>
+<td>
+  ${
+    (doc._source?.observedMetadataUrl && String(doc._source.observedMetadataUrl).trim())
+      ? `<a href="${doc._source.observedMetadataUrl}" target="_blank" rel="noopener noreferrer">Observation Metadata</a>`
+      : `Observation Metadata Unavailable`
+  }
+</td>
+
     </tr>`;
     tableBody.append(row);
   });
