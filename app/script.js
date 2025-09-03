@@ -335,13 +335,30 @@ function renderResults(results) {
       <td>${doc._source.genus}</td>
       <td>${doc._source.trait}</td>
       <td>${doc._source.verbatimTrait}</td>
+
+
 <td>
   ${
-    (doc._source?.observedMetadataUrl && String(doc._source.observedMetadataUrl).trim())
-      ? `<a href="${doc._source.observedMetadataUrl}" target="_blank" rel="noopener noreferrer">Observation Metadata</a>`
-      : `Observation Metadata Unavailable`
+    (() => {
+      const urlFromDoc = String(doc._source?.observedMetadataUrl || '').trim();
+      if (urlFromDoc) {
+        return `<a href="${urlFromDoc}" target="_blank" rel="noopener noreferrer">Observation Metadata</a>`;
+      }
+
+      const rawId = doc._source?.annotationID;
+
+      const npnId = (typeof rawId === 'string' && rawId.startsWith('npn:')) ? rawId.slice(4) : null;
+
+      if (npnId) {
+        const npnUrl = `https://services.usanpn.org/npn_portal/observations/getObservationById.json?request_src=PPO&observation_id=${encodeURIComponent(npnId)}&pretty=1`;
+        return `<a href="${npnUrl}" target="_blank" rel="noopener noreferrer">Observation Metadata</a>`;
+      }
+
+      return 'Observation Metadata Unavailable';
+    })()
   }
 </td>
+
 
     </tr>`;
     tableBody.append(row);
