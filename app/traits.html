@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Trait Tree — 3 Levels Deep</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg:#fff; --fg:#111827; --muted:#6b7280; --hover:#eef2ff; --accent:#4f46e5; --line:#e5e7eb;
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:24px auto;padding:0 16px;}
+  h1{font-size:18px;margin:0 0 6px;}
+  .subtitle{color:var(--muted);margin-bottom:12px;}
+  .actions{display:flex;gap:8px;align-items:center;margin:10px 0 16px;flex-wrap:wrap;}
+  .btn{border:1px solid var(--line);background:#fff;color:var(--fg);padding:6px 10px;border-radius:8px;cursor:pointer;}
+  .btn:hover{background:var(--hover);}
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:20px;}
+  @media (max-width:900px){.grid{grid-template-columns:1fr;}}
+  .tree{border:1px solid var(--line);border-radius:10px;padding:8px 8px 4px;}
+  .node-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px;}
+  .node-row:hover{background:var(--hover);}
+  .node-row .caret{width:28px;height:28px;line-height:28px;text-align:center;font-weight:700;border:0;background:transparent;cursor:pointer;user-select:none;border-radius:6px;}
+  .node-row .caret:hover{background:#e0e7ff;}
+  .node-row .label{font-weight:600;}
+  .node-row .spacer{flex:1;}
+  .children{margin-left:24px;border-left:2px dashed var(--line);padding-left:10px;}
+  .panel{border:1px solid var(--line);border-radius:10px;padding:10px;}
+  .panel h2{font-size:14px;margin:0 0 8px;}
+  .selected-list{max-height:380px;overflow:auto;padding-left:18px;}
+  .muted{color:var(--muted);}
+  .count-pill{margin-left:8px;padding:2px 8px;border-radius:999px;background:#f3f4f6;color:#374151;font-size:12px;}
+  .badge{margin-left:6px;padding:1px 6px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;border:1px solid #c7d2fe;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Trait Tree (CSV-style mapping → Hierarchy)</h1>
+  <div class="subtitle">Showing <strong>3 levels</strong> beneath the hidden root (“plant structure present”).</div>
+
+  <div class="actions">
+    <button id="expandAll" class="btn">Expand All</button>
+    <button id="collapseAll" class="btn">Collapse All</button>
+    <button id="clearSel" class="btn">Clear Selections</button>
+    <span class="muted">Checks affect only visible (rendered) descendants.</span>
+  </div>
+
+  <div class="grid">
+    <div class="tree" id="tree"></div>
+    <div class="panel">
+      <h2>Selected traits <span id="selCount" class="count-pill">0</span></h2>
+      <ol id="selectedList" class="selected-list muted"></ol>
+    </div>
+  </div>
+</div>
+
+<script>
+/**
+ * Three-level demo tree
+ * Each path is LEAF → … → ROOT ("plant structure present").
+ * We'll render only 3 visible levels: root's children (level 1), their children (level 2),
+ * and grandchildren (level 3).
+ */
+const TRAIT_PATHS = [
+  // Reproductive branch
+  ['open flower present', 'flower present', 'reproductive structure present', 'plant structure present'],
+  ['non-senesced flower present', 'flower present', 'reproductive structure present', 'plant structure present'],
+  ['pollen-releasing flower present', 'flower present', 'reproductive structure present', 'plant structure present'],
+  ['flower present', 'reproductive structure present', 'plant structure present'],
+  ['reproductive structure present', 'plant structure present'],
+
+  // Leaf branch
+  ['unfolded true leaf present', 'true leaf present', 'vascular leaf present', 'plant structure present'],
+  ['senescing true leaf present', 'true leaf present', 'vascular leaf present', 'plant structure present'],
+  ['true leaf present', 'vascular leaf present', 'plant structure present'],
+  ['vascular leaf present', 'plant structure present'],
+
+  // Bud branch
+  ['breaking vegetative bud present', 'non-dormant vegetative bud present', 'vegetative bud present', 'plant structure present'],
+  ['non-dormant vegetative bud present', 'vegetative bud present', 'plant structure present'],
+  ['vegetative bud present', 'plant structure present'],
+];
+
+const MAX_VISIBLE_DEPTH = 3; // 1 = children of root, 2 = their children, 3 = grandchildren
+
+/* ===== Graph builder (cycle-safe) ===== */
+function normalize(s){ return String(s||'').trim(); }
+function isReachable(start, target){
+  if (!start || !target) return false;
+  if (start === target) return true;
+  const seen = new Set([start]);
+  const stack = [...(start.children || [])];
+  while (stack.length){
+    const n = stack.pop();
+    if (!n || seen.has(n)) continue;
+    if (n === target) return true;
+    seen.add(n);
+    (n.children || []).forEach(c => stack.push(c));
+  }
+  return false;
+}
+function buildGraphFromPaths(paths){
+  const nodesByLabel = new Map();
+  function ensure(label){
+    label = normalize(label);
+    if (!label) return null;
+    let n = nodesByLabel.get(label);
+    if (!n){
+      n = { label, children: [], parents: new Set() };
+      nodesByLabel.set(label, n);
+    }
+    return n;
+  }
+  function addEdge(parent, child){
+    if (!parent || !child) return;
+    if (isReachable(child, parent)) return; // avoid cycles
+    if (!parent.children.includes(child)) parent.children.push(child);
+    child.parents.add(parent);
+  }
+
+  for (const path of paths){
+    for (let i=0; i<path.length; i++) ensure(path[i]);
+    for (let i=0; i<path.length-1; i++){
+      const child = ensure(path[i]);
+      const parent = ensure(path[i+1]);
+      addEdge(parent, child);
+    }
+  }
+
+  const roots = [];
+  for (const n of nodesByLabel.values()){
+    if (!n.parents || n.parents.size === 0) roots.push(n);
+  }
+  return { nodesByLabel, roots };
+}
+
+/* ===== Build visible start list (hide top root) ===== */
+const { nodesByLabel, roots } = buildGraphFromPaths(TRAIT_PATHS);
+const hiddenTop = nodesByLabel.get('plant structure present');
+const startNodes = hiddenTop && hiddenTop.children.length ? hiddenTop.children.slice() : roots.slice();
+
+/* ===== UI (render only up to MAX_VISIBLE_DEPTH) ===== */
+const treeEl = document.getElementById('tree');
+const selected = new Set();                 // labels
+const nodeToCheckbox = new WeakMap();       // only for rendered nodes
+
+function sortNodes(nodes){ return nodes.slice().sort((a,b)=> a.label.localeCompare(b.label)); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function collectRenderedDescendants(node){
+  const out = new Set();
+  const stack = [node];
+  const seen = new Set();
+  while (stack.length){
+    const n = stack.pop();
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    // only include nodes that actually have a checkbox rendered
+    const cb = nodeToCheckbox.get(n);
+    if (cb) out.add(n);
+    (n.children || []).forEach(ch => stack.push(ch));
+  }
+  return out;
+}
+
+function updateSelectedList(){
+  const list = document.getElementById('selectedList');
+  const count = document.getElementById('selCount');
+  const arr = Array.from(selected).sort();
+  list.innerHTML = arr.map(l => `<li>${escapeHtml(l)}</li>`).join('');
+  count.textContent = arr.length;
+}
+
+function setRenderedSubtreeChecked(node, checked){
+  const nodes = collectRenderedDescendants(node);
+  nodes.forEach(n => {
+    const cb = nodeToCheckbox.get(n);
+    if (cb){
+      cb.checked = checked;
+      cb.indeterminate = false;
+    }
+    if (checked) selected.add(n.label);
+    else selected.delete(n.label);
+  });
+  updateSelectedList();
+}
+
+function renderNode(node, parentEl, depth){
+  const isLeafLevel = depth >= MAX_VISIBLE_DEPTH || !(node.children && node.children.length);
+
+  const row = document.createElement('div');
+  row.className = 'node-row';
+  row.dataset.label = node.label;
+
+  const caret = document.createElement('button');
+  caret.className = 'caret';
+  caret.title = isLeafLevel ? '' : 'Expand/collapse';
+  caret.textContent = isLeafLevel ? '•' : '▸';
+  caret.disabled = isLeafLevel;
+
+  const labelWrap = document.createElement('label');
+  labelWrap.className = 'label';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.style.marginRight = '8px';
+  cb.addEventListener('change', () => setRenderedSubtreeChecked(node, cb.checked));
+  labelWrap.appendChild(cb);
+  labelWrap.appendChild(document.createTextNode(node.label));
+
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  badge.textContent = `level ${depth}`;
+
+  const spacer = document.createElement('div'); spacer.className = 'spacer';
+
+  row.appendChild(caret);
+  row.appendChild(labelWrap);
+  row.appendChild(badge);
+  row.appendChild(spacer);
+  parentEl.appendChild(row);
+
+  // mark as rendered
+  nodeToCheckbox.set(node, cb);
+
+  let childrenWrap = null;
+  if (!isLeafLevel){
+    childrenWrap = document.createElement('div');
+    childrenWrap.className = 'children';
+    childrenWrap.hidden = true; // collapsed by default
+    parentEl.appendChild(childrenWrap);
+
+    sortNodes(node.children).forEach(ch => renderNode(ch, childrenWrap, depth+1));
+  }
+
+  caret.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!childrenWrap) return;
+    const nowHidden = childrenWrap.hidden;
+    childrenWrap.hidden = !nowHidden;
+    caret.textContent = nowHidden ? '▾' : '▸';
+  });
+}
+
+function renderTree(startNodes){
+  treeEl.innerHTML = '';
+  sortNodes(startNodes).forEach(n => renderNode(n, treeEl, 1));
+}
+renderTree(startNodes);
+updateSelectedList();
+
+/* ===== controls ===== */
+document.getElementById('expandAll').addEventListener('click', () => {
+  document.querySelectorAll('.children').forEach(el => { el.hidden = false; });
+  document.querySelectorAll('.caret').forEach(btn => { if (btn.textContent === '▸') btn.textContent = '▾'; });
+});
+document.getElementById('collapseAll').addEventListener('click', () => {
+  document.querySelectorAll('.children').forEach(el => { el.hidden = true; });
+  document.querySelectorAll('.caret').forEach(btn => { if (btn.textContent === '▾') btn.textContent = '▸'; });
+});
+document.getElementById('clearSel').addEventListener('click', () => {
+  selected.clear();
+  document.querySelectorAll('.tree input[type="checkbox"]').forEach(cb => { cb.checked = false; cb.indeterminate = false; });
+  updateSelectedList();
+});
+</script>
+</body>
+</html>
+

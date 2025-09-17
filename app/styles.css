@@ -310,3 +310,63 @@ html, body {
 .table-striped tbody tr:nth-child(odd) {
   background-color: #f9f9f9;
 }
+/* Base text color everywhere */
+html, body { color: #000 !important; background: #fff; }
+
+/* Common containers in your layout */
+.sidebar, .main,
+#tableContainer, #mapContainer, #statsContainer,
+#resultsTable, #resultsTable th, #resultsTable td,
+.toggle-bar, .selected-facets-container { color: #000 !important; }
+
+/* Facet links + the little "X" */
+.facet-link, .facet-link .remove-facet { color: #000 !important; }
+
+/* Modals + jQuery UI dialog */
+#detailsModal, #humanCheckDialog,
+.ui-dialog, .ui-widget, .ui-widget-content, .ui-widget-header,
+.modal-content, .modal-content p, .modal-content a { color: #000 !important; }
+
+/* Leaflet UI (map controls + popups) */
+.leaflet-control, .leaflet-popup-content { color: #000 !important; }
+
+/* Icons inherit text color (Font Awesome) */
+.fa, .fas, .far { color: inherit !important; }
+
+/* Buttons (so Bootstrap doesn't force white text) */
+.btn, .btn-default, .btn-primary { color: #000 !important; }
+
+/* Links (optional) */
+a, a:visited { color: #0645AD; }
+
+.label {
+	color: #020202;
+}
+
+/* === Sidebar single-spacing overrides === */
+.sidebar .facet-title {
+  margin: 10px 0 6px;   /* tighter title spacing */
+    line-height: 1.2;
+	}
+
+	.sidebar .facet-link {
+	  margin-bottom: 2px;   /* was 10px */
+	    line-height: 1.2;     /* single-spaced look */
+		  padding: 2px 0;       /* minimal vertical padding */
+		  }
+
+/* Fill the column and pin pagination at bottom */
+#tableContainer {
+  flex: 1;                 /* occupy remaining height in .main */
+  display: flex;
+  flex-direction: column;
+}
+
+#pagination {
+  margin-top: auto;        /* push pagination to the bottom */
+  padding: 6px 0;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
