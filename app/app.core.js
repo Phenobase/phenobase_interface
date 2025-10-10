@@ -241,7 +241,9 @@ function showDetailsModal(sourceData) {
   Object.entries(sourceData || {}).forEach(([k,v]) => {
     if (k === 'observedImageUrl' || k === 'observedImageGuid') {
       content.find('div:last-child').append(`<p><strong>${k}:</strong> <a href="${sourceData.observedImageUrl}" target="_blank">${v}</a></p>`);
-    } else { content.find('div:last-child').append(`<p><strong>${k}:</strong> ${v}</p>`); }
+    } else if (k === 'dataset_id') {
+	  // do nothing
+	} else { content.find('div:last-child').append(`<p><strong>${k}:</strong> ${v}</p>`); }
   });
   modal.css("display", "flex");
 }
