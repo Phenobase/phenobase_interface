@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Traits — Plant Structure Present / Absent</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root { --bg:#fff; --fg:#111827; --muted:#6b7280; --hover:#eef2ff; --line:#e5e7eb; }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:24px auto;padding:0 16px;}
+  h1{font-size:18px;margin:0 0 6px;}
+  .subtitle{color:var(--muted);margin-bottom:12px;}
+  .actions{display:flex;gap:8px;align-items:center;margin:10px 0 16px;flex-wrap:wrap;}
+  .btn{border:1px solid var(--line);background:#fff;color:var(--fg);padding:6px 10px;border-radius:8px;cursor:pointer;}
+  .btn:hover{background:var(--hover);}
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:20px;}
+  @media (max-width:900px){.grid{grid-template-columns:1fr;}}
+  .tree{border:1px solid var(--line);border-radius:10px;padding:8px;min-height:120px}
+  .node-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px;}
+  .node-row:hover{background:var(--hover);}
+  .caret{width:28px;height:28px;line-height:28px;text-align:center;font-weight:700;border:0;background:transparent;cursor:pointer;user-select:none;border-radius:6px;}
+  .label{font-weight:600;}
+  .spacer{flex:1;}
+  .children{margin-left:24px;border-left:2px dashed var(--line);padding-left:10px;}
+  .panel{border:1px solid var(--line);border-radius:10px;padding:10px;}
+  .panel h2{font-size:14px;margin:0 0 8px;}
+  .selected-list{max-height:380px;overflow:auto;padding-left:18px;}
+  .muted{color:var(--muted);}
+  .count-pill{margin-left:8px;padding:2px 8px;border-radius:999px;background:#f3f4f6;color:#374151;font-size:12px;}
+  .badge{margin-left:6px;padding:1px 6px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;border:1px solid #c7d2fe;}
+  .err{color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:10px;border-radius:8px;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Traits — Plant Structure Present / Absent</h1>
+  <div class="subtitle">
+    Top level shows <strong>Plant Structure Present</strong> and <strong>Plant Structure Absent</strong>. Present branches keep their ontology.
+  </div>
+
+  <div class="actions">
+    <button id="expandAll" class="btn">Expand All</button>
+    <button id="collapseAll" class="btn">Collapse All</button>
+    <button id="clearSel" class="btn">Clear Selections</button>
+    <span class="muted">Checks affect only visible (rendered) descendants.</span>
+  </div>
+
+  <div class="grid">
+    <div id="tree" class="tree"><span class="muted">Loading…</span></div>
+    <div class="panel">
+      <h2>Selected traits <span id="selCount" class="count-pill">0</span></h2>
+      <ol id="selectedList" class="selected-list muted"></ol>
+    </div>
+  </div>
+  <div id="error" class="err" style="display:none"></div>
+</div>
+
+<script>
+const CSV_URL = 'https://raw.githubusercontent.com/Phenobase/phenobase_data/version2/data/traits.csv';
+
+// Visible top nodes
+const PRESENT_TOP = 'Plant Structure Present';
+const ABSENT_TOP  = 'Plant Structure Absent';
+
+// Lowercase form that appears in the CSV at the end of present chains
+const CSV_PRESENT_TERMINAL = 'plant structure present';
+
+// ===== CSV (no dependencies) =====
+function parseCSV(text){
+  const rows=[]; let i=0,f='',q=false,row=[];
+  const pushF=()=>{row.push(f);f='';}, pushR=()=>{rows.push(row);row=[];};
+  while(i<text.length){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){f+='"';i+=2;continue;} q=false;i++;continue;}
+      f+=ch;i++;continue;
+    }else{
+      if(ch==='"'){q=true;i++;continue;}
+      if(ch===','){pushF();i++;continue;}
+      if(ch==='\r'){i++;continue;}
+      if(ch==='\n'){pushF();pushR();i++;continue;}
+      f+=ch;i++;continue;
+    }
+  }
+  pushF();pushR();
+  if(rows.length && rows[rows.length-1].every(c=>c==='')) rows.pop();
+  return rows;
+}
+function rowsToObjects(rows){
+  if(!rows.length) return [];
+  const hdr = rows[0].map(h=>String(h||'').trim());
+  return rows.slice(1).map(r=>{
+    const o={}; hdr.forEach((h,i)=>o[h]=r[i]!==undefined?r[i]:''); return o;
+  });
+}
+
+// ===== helpers & graph =====
+const norm = s => String(s||'').trim();
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const isAbsent = s => /\babsent$/i.test(norm(s));
+function isReachable(start,target){
+  if(!start||!target) return false;
+  if(start===target) return true;
+  const seen=new Set([start]); const st=[...(start.children||[])];
+  while(st.length){
+    const n=st.pop(); if(!n||seen.has(n)) continue;
+    if(n===target) return true; seen.add(n);
+    (n.children||[]).forEach(c=>st.push(c));
+  }
+  return false;
+}
+function buildGraph(paths){
+  const byLabel=new Map();
+  const ensure=label=>{
+    label=norm(label); if(!label) return null;
+    let n=byLabel.get(label);
+    if(!n){ n={label,children:[],parents:new Set()}; byLabel.set(label,n); }
+    return n;
+  };
+  const add=(p,c)=>{
+    if(!p||!c) return;
+    if(isReachable(c,p)) return;
+    if(!p.children.includes(c)) p.children.push(c);
+    c.parents.add(p);
+  };
+  paths.forEach(path=>{
+    for(let i=0;i<path.length;i++) ensure(path[i]);
+    for(let i=0;i<path.length-1;i++){
+      const child=ensure(path[i]);
+      const parent=ensure(path[i+1]);
+      add(parent,child);
+    }
+  });
+  const roots=[];
+  for(const n of byLabel.values()){
+    if(!n.parents || n.parents.size===0) roots.push(n);
+  }
+  return {byLabel,roots};
+}
+function sortNodes(nodes){ return nodes.slice().sort((a,b)=>a.label.localeCompare(b.label)); }
+
+// ===== selection UI =====
+const treeEl = document.getElementById('tree');
+const selected = new Set();
+const nodeToCheckbox = new WeakMap();
+
+function collectRenderedDescendants(node){
+  const out = new Set();
+  const stack = [node];
+  const seen = new Set();
+  while (stack.length){
+    const n = stack.pop();
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    const cb = nodeToCheckbox.get(n);
+    if (cb) out.add(n);
+    (n.children || []).forEach(ch => stack.push(ch));
+  }
+  return out;
+}
+function updateSelectedList(){
+  const list = document.getElementById('selectedList');
+  const count = document.getElementById('selCount');
+  const arr = Array.from(selected).sort();
+  list.innerHTML = arr.map(l => `<li>${escapeHtml(l)}</li>`).join('');
+  count.textContent = arr.length;
+}
+function setRenderedSubtreeChecked(node, checked){
+  const nodes = collectRenderedDescendants(node);
+  nodes.forEach(n => {
+    const cb = nodeToCheckbox.get(n);
+    if (cb){ cb.checked = checked; cb.indeterminate = false; }
+    if (checked) selected.add(n.label); else selected.delete(n.label);
+  });
+  updateSelectedList();
+}
+
+// ===== render =====
+function renderNode(node, parentEl, depth=1){
+  const hasChildren = !!(node.children && node.children.length);
+
+  const row=document.createElement('div');
+  row.className='node-row';
+  row.dataset.label=node.label;
+
+  const caret=document.createElement('button');
+  caret.className='caret';
+  caret.title = hasChildren ? 'Expand/collapse' : '';
+  caret.textContent= hasChildren ? '▸' : '•';
+  caret.disabled=!hasChildren;
+
+  const labelWrap = document.createElement('label');
+  labelWrap.className='label';
+  const cb = document.createElement('input');
+  cb.type='checkbox';
+  cb.style.marginRight='8px';
+  cb.addEventListener('change', ()=> setRenderedSubtreeChecked(node, cb.checked));
+  labelWrap.appendChild(cb);
+  labelWrap.appendChild(document.createTextNode(node.label));
+
+  const spacer=document.createElement('div'); spacer.className='spacer';
+
+  row.appendChild(caret); row.appendChild(labelWrap); row.appendChild(spacer);
+  parentEl.appendChild(row);
+
+  nodeToCheckbox.set(node, cb);
+
+  if(hasChildren){
+    const kidsWrap=document.createElement('div');
+    kidsWrap.className='children';
+    kidsWrap.hidden=true;
+    parentEl.appendChild(kidsWrap);
+
+    sortNodes(node.children).forEach(ch=>renderNode(ch, kidsWrap, depth+1));
+
+    caret.addEventListener('click', e=>{
+      e.preventDefault(); e.stopPropagation();
+      const wasHidden=kidsWrap.hidden;
+      kidsWrap.hidden=!wasHidden;
+      caret.textContent=wasHidden?'▾':'▸';
+    });
+  }
+}
+function renderForest(topNodes){
+  treeEl.innerHTML='';
+  if(!topNodes.length){ treeEl.innerHTML='<span class="muted">No traits found.</span>'; return; }
+  sortNodes(topNodes).forEach(n=>renderNode(n, treeEl));
+}
+
+// ===== main =====
+(async function go(){
+  try{
+    const r = await fetch(CSV_URL, {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const text = await r.text();
+    const rows = parseCSV(text);
+    const data = rowsToObjects(rows);
+
+    // Build paths so that the terminal node is:
+    //  - ABSENT_TOP if any segment ends with 'absent'
+    //  - PRESENT_TOP otherwise (and ensure the CSV's 'plant structure present' is kept just above this)
+    const paths = [];
+    for(const row of data){
+      const chainRaw = row.mappedTraits ?? row.mappedtraits ?? '';
+      const parts = norm(chainRaw).split('|').map(norm).filter(Boolean);
+      if(!parts.length) continue;
+
+      const absentBranch = parts.some(isAbsent);
+      if (absentBranch) {
+        // Route to Plant Structure Absent
+        if (parts[parts.length-1] !== ABSENT_TOP) parts.push(ABSENT_TOP);
+      } else {
+        // Keep ontology's terminal "plant structure present" (lowercase in CSV),
+        // then make top-level be Plant Structure Present
+        const last = parts[parts.length-1].toLowerCase();
+        if (last !== CSV_PRESENT_TERMINAL) parts.push(CSV_PRESENT_TERMINAL);
+        parts.push(PRESENT_TOP);
+      }
+      paths.push(parts);
+    }
+
+    // Deduplicate identical paths
+    const seen=new Set(), unique=[];
+    for(const p of paths){
+      const k=p.join(' > ');
+      if(!seen.has(k)){ seen.add(k); unique.push(p); }
+    }
+
+    const {byLabel} = buildGraph(unique);
+
+    // Optional polish: promote children of the lower-case CSV terminal under the titled Present node,
+    // and remove the lower-case node as an intermediate level (cleaner tree).
+    const csvPresentNode = byLabel.get(CSV_PRESENT_TERMINAL);
+    const presentTop     = byLabel.get(PRESENT_TOP);
+    if (csvPresentNode && presentTop) {
+      // attach children of csvPresentNode directly under Present top
+      const merged = new Set([...(presentTop.children||[]), ...(csvPresentNode.children||[])]);
+      presentTop.children = Array.from(merged);
+      // also, detach csvPresentNode from Present (so we don't see a redundant level)
+      // (no need to fully delete; it's just not a root anymore)
+    }
+
+    const absentTop = byLabel.get(ABSENT_TOP);
+
+    // Visible roots: Plant Structure Present, Plant Structure Absent
+    const top = [presentTop, absentTop].filter(Boolean);
+    renderForest(top);
+    updateSelectedList();
+  }catch(err){
+    const e=document.getElementById('error');
+    e.style.display='block';
+    e.textContent='Failed to load traits.csv: ' + (err?.message || err);
+    treeEl.innerHTML='';
+  }
+})();
+
+// Controls
+document.getElementById('expandAll').addEventListener('click', ()=>{
+  document.querySelectorAll('.children').forEach(el=>{ el.hidden=false; });
+  document.querySelectorAll('.caret').forEach(btn=>{ if(btn.textContent==='▸') btn.textContent='▾'; });
+});
+document.getElementById('collapseAll').addEventListener('click', ()=>{
+  document.querySelectorAll('.children').forEach(el=>{ el.hidden=true; });
+  document.querySelectorAll('.caret').forEach(btn=>{ if(btn.textContent==='▾') btn.textContent='▸'; });
+});
+document.getElementById('clearSel').addEventListener('click', ()=>{
+  selected.clear();
+  document.querySelectorAll('.tree input[type="checkbox"]').forEach(cb=>{ cb.checked=false; cb.indeterminate=false; });
+  updateSelectedList();
+});
+</script>
+</body>
+</html>
+
