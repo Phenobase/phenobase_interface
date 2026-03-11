@@ -194,6 +194,7 @@ html, body {
 /* Set the map container to fill available height */
 #mapContainer {
   flex: 1; /* Allows the map to expand within its container */
+  position: relative;
 }
 
 /* Set the map itself to fill the entire height of its container */
@@ -319,8 +320,206 @@ html, body { color: #000 !important; background: #fff; }
 #resultsTable, #resultsTable th, #resultsTable td,
 .toggle-bar, .selected-facets-container { color: #000 !important; }
 
+.filter-label {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filter-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.date-range-controls {
+  margin-top: 6px;
+}
+
+#yearRangeSlider {
+  margin: 8px 4px 4px;
+}
+
+#yearRangeDisplay {
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.presence-controls {
+  border: 0;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.presence-controls label {
+  display: block;
+  margin: 4px 0;
+  font-weight: normal;
+}
+
+.presence-controls input {
+  margin-right: 6px;
+}
+
+.filter-hint {
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+#phenophaseFilters {
+  margin-top: 8px;
+}
+
+.phenophase-category {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  margin-bottom: 8px;
+}
+
+.phenophase-category summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-weight: 600;
+}
+
+.phenophase-options {
+  padding: 0 10px 10px;
+}
+
+.phenophase-option {
+  display: block;
+  margin: 4px 0;
+  font-weight: normal;
+}
+
+.phenophase-option input {
+  margin-right: 6px;
+}
+
+.phenophase-count {
+  color: #777;
+  margin-left: 4px;
+  font-size: 12px;
+}
+
+.trait-mode-toggle {
+  margin: 8px 0 4px;
+  display: flex;
+  gap: 6px;
+}
+
+.trait-mode-toggle .btn.active {
+  border-color: #337ab7;
+  font-weight: 700;
+}
+
+#allTraitsFilters {
+  margin-top: 6px;
+}
+
+.geo-filter-controls {
+  margin-top: 6px;
+}
+
+.geo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+
+.geo-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.map-bounds-btn {
+  margin-top: 8px;
+}
+
+.map-draw-help {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  max-width: 360px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.bbox-tool-control a {
+  width: auto !important;
+  min-width: 52px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.bbox-tool-control .bbox-tool-arm.bbox-active {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.bbox-tool-control .bbox-tool-arm.bbox-disabled {
+  opacity: 0.6;
+}
+
+.bbox-tool-control .bbox-tool-cancel {
+  color: #b91c1c;
+}
+
+.bbox-hint-popup .leaflet-popup-content {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.map-load-status {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 1000;
+  max-width: 420px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 8px;
+}
+
+.map-load-status.error {
+  background: rgba(127, 29, 29, 0.9);
+  color: #fff;
+  border-color: rgba(127, 29, 29, 0.9);
+}
+
+.results-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#querySummary {
+  font-size: 12px;
+}
+
 /* Facet links + the little "X" */
 .facet-link, .facet-link .remove-facet { color: #000 !important; }
+.facet-see-more { display: inline-block; margin: 2px 0 8px; color: #000 !important; }
+.facet-see-more em { font-style: italic; }
 
 /* Modals + jQuery UI dialog */
 #detailsModal, #humanCheckDialog,
@@ -369,4 +568,3 @@ a, a:visited { color: #0645AD; }
   gap: 8px;
   justify-content: center;
 }
-

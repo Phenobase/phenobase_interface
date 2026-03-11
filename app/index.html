@@ -39,11 +39,53 @@
         </div>
 
         <!-- Dynamic facets will be populated here -->
-        <div class="facet-title">DataSource</div>
+        <div class="facet-title">Data Source</div>
         <div id="dataSourceFacets"></div>
 
-        <div class="facet-title">Traits</div>
-        <div id="traitFacets"></div>
+        <div class="facet-title">Date Range</div>
+        <div class="date-range-controls">
+          <div class="filter-label">Year range</div>
+          <div id="yearRangeSlider"></div>
+          <div id="yearRangeDisplay" class="filter-hint"></div>
+        </div>
+
+        <div class="facet-title">Presence</div>
+        <fieldset id="presenceModeGroup" class="presence-controls">
+          <label><input type="radio" name="presenceMode" value="both" checked> Both</label>
+          <label><input type="radio" name="presenceMode" value="present"> Present</label>
+          <label><input type="radio" name="presenceMode" value="absent"> Absent</label>
+        </fieldset>
+        <div id="presenceModeHint" class="text-muted filter-hint" style="display:none;"></div>
+
+        <div class="facet-title">Phenophase Categories</div>
+        <div class="trait-mode-toggle">
+          <button id="traitModeSimple" class="btn btn-default btn-sm active" type="button">Simple terms</button>
+          <button id="traitModeAll" class="btn btn-default btn-sm" type="button">All traits</button>
+        </div>
+        <div id="traitModeWarning" class="text-warning filter-hint" style="display:none;"></div>
+        <div id="phenophaseFilters"></div>
+        <div id="allTraitsFilters" style="display:none;"></div>
+
+        <div class="facet-title">Geographic Filter</div>
+        <div class="geo-filter-controls">
+          <div class="geo-grid">
+            <label for="geoMinLat" class="filter-label">Min latitude</label>
+            <input type="number" step="0.0001" id="geoMinLat" class="filter-input" placeholder="-90">
+            <label for="geoMaxLat" class="filter-label">Max latitude</label>
+            <input type="number" step="0.0001" id="geoMaxLat" class="filter-input" placeholder="90">
+            <label for="geoMinLon" class="filter-label">Min longitude</label>
+            <input type="number" step="0.0001" id="geoMinLon" class="filter-input" placeholder="-180">
+            <label for="geoMaxLon" class="filter-label">Max longitude</label>
+            <input type="number" step="0.0001" id="geoMaxLon" class="filter-input" placeholder="180">
+          </div>
+          <div class="geo-actions">
+            <button id="applyGeoBounds" class="btn btn-default btn-sm" type="button">Apply bounds</button>
+            <button id="clearGeoBounds" class="btn btn-default btn-sm" type="button">Clear</button>
+            <button id="setGeoBoundsOnMap" class="btn btn-default btn-sm" type="button">Set bounds on map</button>
+          </div>
+          <button id="useMapBounds" class="btn btn-default btn-sm map-bounds-btn" type="button">Use current map view</button>
+          <div id="geoFilterHint" class="text-muted filter-hint"></div>
+        </div>
 
         <div class="facet-title">Family</div>
         <div id="familyFacets"></div>
@@ -64,7 +106,10 @@
       <div class="col-xs-9 col-xs-offset-3 main">
         <!-- Selection bar for displaying results count and toggling between views -->
         <div class="toggle-bar d-flex align-items-center justify-content-between mb-3 p-2 bg-light rounded">
-          <span id="resultsHeading" class="text-muted">Showing Results</span>
+          <div class="results-meta">
+            <span id="resultsHeading" class="text-muted">Showing Results</span>
+            <span id="querySummary" class="text-muted"></span>
+          </div>
           <div class="btn-group ms-auto" role="group" style="margin-left: auto;">
             <button id="showTable" class="btn btn-custom-table">Table</button>
             <button id="showMap" class="btn btn-custom-map">Map</button>
@@ -75,6 +120,8 @@
 
         <!-- Container for map view -->
         <div id="mapContainer" style="display: none;">
+          <div id="mapDrawHelp" class="map-draw-help" style="display:none;"></div>
+          <div id="mapLoadStatus" class="map-load-status" style="display:none;"></div>
           <div id="map"></div>
         </div>
 

@@ -15,7 +15,7 @@ function isHiddenTrait(v) { return String(v || '').trim().toLowerCase() === HIDD
 var requestData = {
   aggs: {
     datasource_0: { terms: { field: "dataSource", size: 10 } },
-    mappedTraits_1: { terms: { field: "mappedTraits", size: 500 } },
+    mappedTraits_1: { terms: { field: "mappedTraits", size: 2000 } },
     family_2: { terms: { field: "family", size: 50 } },
     genus_3: { terms: { field: "genus", size: 50 } }
   },
@@ -97,28 +97,80 @@ function computeDynamicPageSize() {
 }
 
 // Helpers
-function convertJsonToLucene(jsonQuery) {
-  let conditions = [];
-  if (jsonQuery.bool && Array.isArray(jsonQuery.bool.must)) {
-    jsonQuery.bool.must.forEach((condition) => {
-      if (condition.term) {
-        for (const [field, value] of Object.entries(condition.term)) {
-          conditions.push(`${field}:"${value}"`);
-        }
-      } else if (condition.match) {
-        for (const [field, value] of Object.entries(condition.match)) {
-          conditions.push(`${field}:"${value}"`);
-        }
-      } else if (condition.bool && Array.isArray(condition.bool.should)) {
-        const orParts = condition.bool.should.map(s => {
-          if (s.term) { const [field, value] = Object.entries(s.term)[0]; return `${field}:"${value}"`; }
-          return '';
-        }).filter(Boolean);
-        if (orParts.length) conditions.push(`(${orParts.join(' OR ')})`);
-      }
-    });
+function escapeLuceneValue(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function rangeToLucene(field, spec) {
+  const hasGte = Object.prototype.hasOwnProperty.call(spec || {}, 'gte');
+  const hasGt = Object.prototype.hasOwnProperty.call(spec || {}, 'gt');
+  const hasLte = Object.prototype.hasOwnProperty.call(spec || {}, 'lte');
+  const hasLt = Object.prototype.hasOwnProperty.call(spec || {}, 'lt');
+
+  const left = hasGte ? `[${spec.gte}` : (hasGt ? `{${spec.gt}` : '[*');
+  const right = hasLte ? `${spec.lte}]` : (hasLt ? `${spec.lt}}` : '*]');
+  return `${field}:${left} TO ${right}`;
+}
+
+function clauseToLucene(clause) {
+  if (!clause || typeof clause !== 'object') return '';
+  if (clause.match_all) return '*:*';
+
+  if (clause.term) {
+    const [field, value] = Object.entries(clause.term)[0] || [];
+    return field ? `${field}:"${escapeLuceneValue(value)}"` : '';
   }
-  return conditions.join(' AND ');
+
+  if (clause.match) {
+    const [field, value] = Object.entries(clause.match)[0] || [];
+    return field ? `${field}:"${escapeLuceneValue(value)}"` : '';
+  }
+
+  if (clause.wildcard) {
+    const [field, value] = Object.entries(clause.wildcard)[0] || [];
+    if (!field) return '';
+    const wildcardValue = (value && typeof value === 'object' && value.value != null) ? value.value : value;
+    return `${field}:${escapeLuceneValue(wildcardValue)}`;
+  }
+
+  if (clause.range) {
+    const [field, spec] = Object.entries(clause.range)[0] || [];
+    if (!field || !spec || typeof spec !== 'object') return '';
+    return rangeToLucene(field, spec);
+  }
+
+  if (clause.bool) {
+    const bool = clause.bool;
+    const parts = [];
+
+    if (Array.isArray(bool.must) && bool.must.length) {
+      const must = bool.must.map(clauseToLucene).filter(Boolean);
+      if (must.length) parts.push(must.length > 1 ? `(${must.join(' AND ')})` : must[0]);
+    }
+
+    if (Array.isArray(bool.should) && bool.should.length) {
+      const should = bool.should.map(clauseToLucene).filter(Boolean);
+      if (should.length) parts.push(should.length > 1 ? `(${should.join(' OR ')})` : should[0]);
+    }
+
+    if (Array.isArray(bool.must_not) && bool.must_not.length) {
+      const mustNot = bool.must_not.map(clauseToLucene).filter(Boolean);
+      if (mustNot.length) {
+        const notPart = mustNot.length > 1 ? `(${mustNot.join(' OR ')})` : mustNot[0];
+        parts.push(`NOT ${notPart}`);
+      }
+    }
+
+    if (!parts.length) return '';
+    return parts.length > 1 ? `(${parts.join(' AND ')})` : parts[0];
+  }
+
+  return '';
+}
+
+function convertJsonToLucene(jsonQuery) {
+  const lucene = clauseToLucene(jsonQuery);
+  return lucene || '*:*';
 }
 function showLoader(){ $("#loader").css("display","flex"); $(".facet-link").css("pointer-events","none"); }
 function hideLoader(){ $("#loader").css("display","none"); $(".facet-link").css("pointer-events","auto"); }
@@ -170,7 +222,9 @@ function fetchResults() {
         renderSelectedFacets();
         updateDownloadLink();
         renderPagination(totalResults);
-        renderMapMarkers(results);
+        if (typeof window.markMapNeedsRender === 'function') {
+          window.markMapNeedsRender();
+        }
         updateResultsHeading(`${startResult} - ${endResult}`, totalResults);
       } else { console.error("Unexpected response", response); alert("Unexpected response structure."); }
     },
@@ -290,15 +344,32 @@ $(document).ready(function () {
   $("#searchButton").click(function () { handleScientificNameSearch(); });
 
   $("#showTable").click(function () {
+    if (typeof window.cancelBoundingBoxSelection === 'function') {
+      window.cancelBoundingBoxSelection(false);
+    }
+    if (typeof window.cancelMapDataLoading === 'function') {
+      window.cancelMapDataLoading();
+    }
     $("#tableContainer").show(); $("#mapContainer").hide(); $("#statsContainer").hide();
     computeDynamicPageSize();
     fetchResults();
   });
   $("#showMap").click(function () {
     $("#mapContainer").show(); $("#tableContainer").hide(); $("#statsContainer").hide();
-    setTimeout(() => { map.invalidateSize(); }, 100);
+    setTimeout(() => {
+      map.invalidateSize();
+      if (typeof window.markMapNeedsRender === 'function') {
+        window.markMapNeedsRender();
+      }
+    }, 100);
   });
   $("#showStats").click(function () {
+    if (typeof window.cancelBoundingBoxSelection === 'function') {
+      window.cancelBoundingBoxSelection(false);
+    }
+    if (typeof window.cancelMapDataLoading === 'function') {
+      window.cancelMapDataLoading();
+    }
     $("#statsContainer").show(); $("#mapContainer").hide(); $("#tableContainer").hide();
     fetchStatsData();
   });
@@ -315,4 +386,3 @@ $(document).ready(function () {
     }, 150);
   });
 });
-
