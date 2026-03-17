@@ -30,11 +30,28 @@ export interface BoxStats {
   percentile5: number;
   percentile95: number;
   outliers: number[];
+  baselineDecadeStart?: number;
+  baselineLabel?: string;
+  baselineMedian?: number;
+  deltaMin?: number;
+  deltaMax?: number;
+  deltaQ1?: number;
+  deltaMedian?: number;
+  deltaQ3?: number;
+  deltaWhiskerLow?: number;
+  deltaWhiskerHigh?: number;
+  deltaOutliers?: number[];
 }
 
 export interface ObservationFilter {
   species?: string;
   phenophase?: string;
+}
+
+export interface BuildSeriesOptions {
+  filters?: ObservationFilter;
+  whiskerMode?: WhiskerMode;
+  baselineDecadeStart?: number;
 }
 
 function clampDoy(value: number): number {
@@ -154,12 +171,15 @@ export function computeBoxStats(
 
 export function buildPhenologyBoxPlotSeries(
   data: PhenologyObservation[],
-  filters: ObservationFilter = {},
-  whiskerMode: WhiskerMode = "tukey",
+  options: BuildSeriesOptions = {},
 ): BoxStats[] {
+  const {
+    filters = {},
+    whiskerMode = "tukey",
+    baselineDecadeStart,
+  } = options;
   const filtered = filterObservations(data, filters);
-
-  return groupByDecade(filtered)
+  const series = groupByDecade(filtered)
     .map(({ decadeStart, label, observations }) => {
       const stats = computeBoxStats(
         observations.map((observation) => observation.doy),
@@ -175,4 +195,24 @@ export function buildPhenologyBoxPlotSeries(
       };
     })
     .filter((stats): stats is BoxStats => stats !== null);
+
+  if (!series.length) return series;
+
+  const resolvedBaseline = series.find((stats) => stats.decadeStart === baselineDecadeStart) || series[0];
+  if (!resolvedBaseline) return series;
+
+  return series.map((stats) => ({
+    ...stats,
+    baselineDecadeStart: resolvedBaseline.decadeStart,
+    baselineLabel: resolvedBaseline.label,
+    baselineMedian: resolvedBaseline.median,
+    deltaMin: stats.min - resolvedBaseline.median,
+    deltaMax: stats.max - resolvedBaseline.median,
+    deltaQ1: stats.q1 - resolvedBaseline.median,
+    deltaMedian: stats.median - resolvedBaseline.median,
+    deltaQ3: stats.q3 - resolvedBaseline.median,
+    deltaWhiskerLow: stats.whiskerLow - resolvedBaseline.median,
+    deltaWhiskerHigh: stats.whiskerHigh - resolvedBaseline.median,
+    deltaOutliers: stats.outliers.map((value) => value - resolvedBaseline.median),
+  }));
 }

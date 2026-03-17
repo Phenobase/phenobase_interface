@@ -228,6 +228,9 @@ function handleScientificNameSearch() {
     updateQueryWithSelectedFacets();
   }
   fetchResults();
+  if ($('#statsContainer').is(':visible') && typeof window.fetchStatsData === 'function') {
+    window.fetchStatsData();
+  }
 }
 
 // Fetch & render

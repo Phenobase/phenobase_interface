@@ -63,6 +63,8 @@ export function PhenologyBoxPlotByDecadeExample() {
         species={species || undefined}
         phenophase={phenophase || undefined}
         title="Mock Phenology Timing"
+        baselineDecadeStart={1980}
+        defaultMetricMode="absolute"
       />
     </div>
   );

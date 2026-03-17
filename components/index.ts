@@ -1,5 +1,5 @@
 export { PhenologyBoxPlotByDecade } from "./PhenologyBoxPlotByDecade";
-export type { PhenologyBoxPlotByDecadeProps } from "./PhenologyBoxPlotByDecade";
+export type { MetricMode, PhenologyBoxPlotByDecadeProps, ViewMode } from "./PhenologyBoxPlotByDecade";
 export {
   buildPhenologyBoxPlotSeries,
   computeBoxStats,
@@ -9,6 +9,7 @@ export {
 } from "./phenologyBoxPlotUtils";
 export type {
   BoxStats,
+  BuildSeriesOptions,
   GroupedDecade,
   ObservationFilter,
   PhenologyObservation,

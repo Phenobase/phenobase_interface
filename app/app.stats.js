@@ -4,6 +4,69 @@ const STATS_PERCENTILES = [25, 50, 75];
 const STATS_MIN_DOY = 1;
 const STATS_MAX_DOY = 366;
 const statsCharts = [];
+let phenologyBoxPlotPluginRegistered = false;
+
+function ensurePhenologyBoxPlotPlugin() {
+  if (phenologyBoxPlotPluginRegistered || typeof Chart !== "function") return;
+
+  Chart.register({
+    id: "phenologyBoxPlotOverlay",
+    afterDatasetsDraw(chart, _args, pluginOptions) {
+      const options = pluginOptions || {};
+      const boxStats = Array.isArray(options.boxStats) ? options.boxStats : [];
+      const datasetIndex = Number.isInteger(options.datasetIndex) ? options.datasetIndex : 0;
+      const meta = chart.getDatasetMeta(datasetIndex);
+      const yScale = chart.scales?.y;
+      if (!meta?.data?.length || !yScale) return;
+
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = options.strokeColor || "#0f172a";
+      ctx.lineWidth = options.lineWidth || 1.5;
+
+      boxStats.forEach((stats, index) => {
+        if (!stats) return;
+        const element = meta.data[index];
+        if (!element) return;
+
+        const centerX = element.x;
+        const boxWidth = Math.max(14, (element.width || 24) - 4);
+        const capHalfWidth = Math.max(5, Math.min(10, boxWidth * 0.28));
+        const medianHalfWidth = Math.max(8, boxWidth * 0.5);
+
+        const q1Y = yScale.getPixelForValue(stats.q1);
+        const q3Y = yScale.getPixelForValue(stats.q3);
+        const medianY = yScale.getPixelForValue(stats.median);
+        const whiskerLowY = yScale.getPixelForValue(stats.whiskerLow);
+        const whiskerHighY = yScale.getPixelForValue(stats.whiskerHigh);
+
+        ctx.beginPath();
+        ctx.moveTo(centerX, whiskerHighY);
+        ctx.lineTo(centerX, q3Y);
+        ctx.moveTo(centerX, q1Y);
+        ctx.lineTo(centerX, whiskerLowY);
+        ctx.moveTo(centerX - capHalfWidth, whiskerHighY);
+        ctx.lineTo(centerX + capHalfWidth, whiskerHighY);
+        ctx.moveTo(centerX - capHalfWidth, whiskerLowY);
+        ctx.lineTo(centerX + capHalfWidth, whiskerLowY);
+        ctx.stroke();
+
+        ctx.save();
+        ctx.strokeStyle = options.medianColor || "#1d4ed8";
+        ctx.lineWidth = options.medianLineWidth || 2.5;
+        ctx.beginPath();
+        ctx.moveTo(centerX - medianHalfWidth, medianY);
+        ctx.lineTo(centerX + medianHalfWidth, medianY);
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      ctx.restore();
+    },
+  });
+
+  phenologyBoxPlotPluginRegistered = true;
+}
 
 function destroyStatsCharts() {
   while (statsCharts.length) {
@@ -58,10 +121,15 @@ function buildStatsRequestData() {
                   },
                 },
                 aggs: {
-                  doy_percentiles: {
-                    percentiles: {
+                  doy_histogram: {
+                    histogram: {
                       field: "dayOfYear",
-                      percents: STATS_PERCENTILES,
+                      interval: 1,
+                      min_doc_count: 0,
+                      extended_bounds: {
+                        min: STATS_MIN_DOY,
+                        max: STATS_MAX_DOY,
+                      },
                     },
                   },
                 },
@@ -112,9 +180,84 @@ function renderTable(id, headers, rows, title) {
   container.appendChild(table);
 }
 
-function percentileValue(values, key) {
-  const value = Number(values?.[key]);
-  return Number.isFinite(value) ? value : null;
+function doyHistogramEntries(buckets) {
+  return (buckets || [])
+    .map((bucket) => ({
+      value: Number(bucket?.key),
+      count: Number(bucket?.doc_count) || 0,
+    }))
+    .filter((entry) => Number.isFinite(entry.value) && entry.count > 0)
+    .sort((a, b) => a.value - b.value);
+}
+
+function totalHistogramCount(entries) {
+  return entries.reduce((sum, entry) => sum + entry.count, 0);
+}
+
+function histogramValueAtRank(entries, rank) {
+  let seen = 0;
+  for (const entry of entries) {
+    seen += entry.count;
+    if (rank < seen) return entry.value;
+  }
+  return entries.length ? entries[entries.length - 1].value : null;
+}
+
+function histogramQuantile(entries, percentile) {
+  const total = totalHistogramCount(entries);
+  if (!total) return null;
+  if (total === 1) return entries[0].value;
+
+  const index = (total - 1) * percentile;
+  const lowerRank = Math.floor(index);
+  const upperRank = Math.ceil(index);
+  const lowerValue = histogramValueAtRank(entries, lowerRank);
+  const upperValue = histogramValueAtRank(entries, upperRank);
+  if (lowerValue == null || upperValue == null) return null;
+  if (lowerRank === upperRank) return lowerValue;
+
+  const weight = index - lowerRank;
+  return lowerValue + (upperValue - lowerValue) * weight;
+}
+
+function firstHistogramValueAtOrAbove(entries, threshold) {
+  for (const entry of entries) {
+    if (entry.value >= threshold) return entry.value;
+  }
+  return entries.length ? entries[0].value : null;
+}
+
+function lastHistogramValueAtOrBelow(entries, threshold) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index].value <= threshold) return entries[index].value;
+  }
+  return entries.length ? entries[entries.length - 1].value : null;
+}
+
+function computeTukeyBoxStatsFromHistogram(buckets) {
+  const entries = doyHistogramEntries(buckets);
+  const count = totalHistogramCount(entries);
+  if (!count) return null;
+
+  const q1 = histogramQuantile(entries, 0.25);
+  const median = histogramQuantile(entries, 0.5);
+  const q3 = histogramQuantile(entries, 0.75);
+  if (q1 == null || median == null || q3 == null) return null;
+
+  const iqr = q3 - q1;
+  const lowerFence = q1 - 1.5 * iqr;
+  const upperFence = q3 + 1.5 * iqr;
+  const whiskerLow = firstHistogramValueAtOrAbove(entries, lowerFence);
+  const whiskerHigh = lastHistogramValueAtOrBelow(entries, upperFence);
+  if (whiskerLow == null || whiskerHigh == null) return null;
+
+  return {
+    q1,
+    median,
+    q3,
+    whiskerLow,
+    whiskerHigh,
+  };
 }
 
 function renderTraitDecadeCharts(aggregations) {
@@ -131,7 +274,7 @@ function renderTraitDecadeCharts(aggregations) {
 
   const note = document.createElement("p");
   note.className = "stats-note";
-  note.textContent = "Each chart shows one trait. Bars mark the middle 50% of day-of-year observations in each decade and the line marks the median.";
+  note.textContent = "Each chart shows one trait. Boxes mark the middle 50% of day-of-year observations, the line inside each box is the median, and whiskers follow the Tukey box-plot rule to the nearest non-outlier day of year in each decade.";
   container.appendChild(note);
 
   if (typeof Chart !== "function") {
@@ -141,6 +284,8 @@ function renderTraitDecadeCharts(aggregations) {
     container.appendChild(fallback);
     return;
   }
+
+  ensurePhenologyBoxPlotPlugin();
 
   const traitBuckets = (aggregations?.mappedTraitsByDecade_4?.buckets || [])
     .filter((bucket) => !isStatsHiddenTrait(bucket?.key))
@@ -161,7 +306,7 @@ function renderTraitDecadeCharts(aggregations) {
     const decadeBuckets = bucket?.doy_records?.decades?.buckets || [];
     const labels = [];
     const rangeData = [];
-    const medianData = [];
+    const boxStatsByIndex = [];
     const countsByIndex = [];
 
     decadeBuckets.forEach((decadeBucket) => {
@@ -173,29 +318,37 @@ function renderTraitDecadeCharts(aggregations) {
 
       if (!count) {
         rangeData.push(null);
-        medianData.push(null);
+        boxStatsByIndex.push(null);
         return;
       }
 
-      const percentiles = decadeBucket?.doy_percentiles?.values || {};
-      const q1 = percentileValue(percentiles, "25.0");
-      const median = percentileValue(percentiles, "50.0");
-      const q3 = percentileValue(percentiles, "75.0");
-
-      if (q1 == null || median == null || q3 == null) {
+      const stats = computeTukeyBoxStatsFromHistogram(decadeBucket?.doy_histogram?.buckets || []);
+      if (!stats) {
         rangeData.push(null);
-        medianData.push(null);
+        boxStatsByIndex.push(null);
         return;
       }
+
+      const clampedQ1 = Math.max(STATS_MIN_DOY, stats.q1);
+      const clampedMedian = Math.max(STATS_MIN_DOY, Math.min(STATS_MAX_DOY, stats.median));
+      const clampedQ3 = Math.min(STATS_MAX_DOY, stats.q3);
+      const clampedWhiskerLow = Math.max(STATS_MIN_DOY, stats.whiskerLow);
+      const clampedWhiskerHigh = Math.min(STATS_MAX_DOY, stats.whiskerHigh);
 
       rangeData.push([
-        Math.max(STATS_MIN_DOY, q1),
-        Math.min(STATS_MAX_DOY, q3),
+        clampedQ1,
+        clampedQ3,
       ]);
-      medianData.push(Math.max(STATS_MIN_DOY, Math.min(STATS_MAX_DOY, median)));
+      boxStatsByIndex.push({
+        q1: clampedQ1,
+        median: clampedMedian,
+        q3: clampedQ3,
+        whiskerLow: clampedWhiskerLow,
+        whiskerHigh: clampedWhiskerHigh,
+      });
     });
 
-    const hasVisibleData = rangeData.some((value) => Array.isArray(value)) || medianData.some((value) => value != null);
+    const hasVisibleData = rangeData.some((value) => Array.isArray(value));
     if (!hasVisibleData) return;
 
     const card = document.createElement("section");
@@ -230,24 +383,13 @@ function renderTraitDecadeCharts(aggregations) {
         datasets: [
           {
             type: "bar",
-            label: "Middle 50%",
+            label: "Box plot",
             data: rangeData,
             backgroundColor: "rgba(147, 197, 253, 0.65)",
             borderColor: "rgba(37, 99, 235, 0.95)",
             borderWidth: 1,
+            borderSkipped: false,
             borderRadius: 4,
-          },
-          {
-            type: "line",
-            label: "Median",
-            data: medianData,
-            borderColor: "#1d4ed8",
-            backgroundColor: "#1d4ed8",
-            borderWidth: 2,
-            pointRadius: 2.5,
-            pointHoverRadius: 4,
-            tension: 0.2,
-            spanGaps: false,
           },
         ],
       },
@@ -260,6 +402,12 @@ function renderTraitDecadeCharts(aggregations) {
           intersect: false,
         },
         plugins: {
+          phenologyBoxPlotOverlay: {
+            boxStats: boxStatsByIndex,
+            datasetIndex: 0,
+            strokeColor: "#0f172a",
+            medianColor: "#1d4ed8",
+          },
           legend: {
             position: "top",
             labels: {
@@ -274,13 +422,14 @@ function renderTraitDecadeCharts(aggregations) {
             callbacks: {
               label(context) {
                 const count = countsByIndex[context.dataIndex] || 0;
-                if (context.dataset.type === "bar") {
-                  const value = context.raw;
-                  if (!Array.isArray(value)) return "No day-of-year observations";
-                  return `Middle 50%: ${Math.round(value[0])}-${Math.round(value[1])} (${count.toLocaleString()} obs)`;
-                }
-                if (context.parsed?.y == null) return "Median: n/a";
-                return `Median: ${Math.round(context.parsed.y)} (${count.toLocaleString()} obs)`;
+                const stats = boxStatsByIndex[context.dataIndex];
+                if (!stats) return "No day-of-year observations";
+                return [
+                  `Median: ${Math.round(stats.median)}`,
+                  `IQR: ${Math.round(stats.q1)}-${Math.round(stats.q3)}`,
+                  `Whiskers: ${Math.round(stats.whiskerLow)}-${Math.round(stats.whiskerHigh)}`,
+                  `n: ${count.toLocaleString()}`,
+                ];
               },
             },
           },
