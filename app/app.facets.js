@@ -190,11 +190,37 @@
     return new Set((portalFilters.selectedPhenophases || []).map((p) => normalizeLower(p)).filter(Boolean));
   }
 
+  function formatCorner(lat, lon) {
+    return `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}`;
+  }
+
   function formatList(values, limit) {
     const arr = toArray(values).filter((v) => String(v || '').trim() !== '');
     if (!arr.length) return '';
     if (arr.length <= limit) return arr.join(', ');
     return `${arr.slice(0, limit).join(', ')} +${arr.length - limit} more`;
+  }
+
+  function closeAllFilterHelpPopovers() {
+    document.querySelectorAll('.filter-help-popover').forEach((popover) => {
+      popover.hidden = true;
+    });
+    document.querySelectorAll('.filter-info-btn').forEach((button) => {
+      button.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function toggleFilterHelpPopover(buttonEl) {
+    const targetId = String(buttonEl?.dataset?.infoTarget || '');
+    const target = targetId ? document.getElementById(targetId) : null;
+    if (!target) return;
+
+    const willOpen = target.hidden;
+    closeAllFilterHelpPopovers();
+    if (!willOpen) return;
+
+    target.hidden = false;
+    buttonEl.setAttribute('aria-expanded', 'true');
   }
 
   function getTraitMode() {
@@ -288,8 +314,9 @@
     selectedFacets = window.selectedFacets || {};
     const parts = [];
 
-    if (window.scientificNameFilter?.match?.scientificName) {
-      parts.push(`Name: ${window.scientificNameFilter.match.scientificName}`);
+    const nameSearchText = String(window.scientificNameSearchText || '').trim();
+    if (nameSearchText) {
+      parts.push(`Name: ${nameSearchText}`);
     }
 
     Object.entries(selectedFacets).forEach(([field, values]) => {
@@ -562,22 +589,12 @@
   }
 
   function syncUiFromState() {
-    const minLat = document.getElementById('geoMinLat');
-    const maxLat = document.getElementById('geoMaxLat');
-    const minLon = document.getElementById('geoMinLon');
-    const maxLon = document.getElementById('geoMaxLon');
-
     const bounds = normalizeGeoBounds(portalFilters.geoBounds);
-    if (bounds) {
-      if (minLat) minLat.value = bounds.minLatText;
-      if (maxLat) maxLat.value = bounds.maxLatText;
-      if (minLon) minLon.value = bounds.minLonText;
-      if (maxLon) maxLon.value = bounds.maxLonText;
-    } else {
-      if (minLat) minLat.value = '';
-      if (maxLat) maxLat.value = '';
-      if (minLon) minLon.value = '';
-      if (maxLon) maxLon.value = '';
+    const hint = document.getElementById('geoFilterHint');
+    if (hint) {
+      hint.textContent = bounds
+        ? `Southwest: ${formatCorner(bounds.minLat, bounds.minLon)} | Northeast: ${formatCorner(bounds.maxLat, bounds.maxLon)}`
+        : '';
     }
 
     const radios = document.querySelectorAll('input[name="presenceMode"]');
@@ -606,41 +623,6 @@
     portalFilters.geoBounds = null;
     portalFilters.traitMode = 'simple';
     clearTraitModeWarning();
-  }
-
-  function applyGeoBoundsFromInputs() {
-    const minLat = document.getElementById('geoMinLat');
-    const maxLat = document.getElementById('geoMaxLat');
-    const minLon = document.getElementById('geoMinLon');
-    const maxLon = document.getElementById('geoMaxLon');
-
-    const raw = {
-      minLat: minLat ? minLat.value : '',
-      maxLat: maxLat ? maxLat.value : '',
-      minLon: minLon ? minLon.value : '',
-      maxLon: maxLon ? maxLon.value : '',
-    };
-
-    const anyValue = Object.values(raw).some((v) => String(v).trim() !== '');
-    const hint = document.getElementById('geoFilterHint');
-
-    if (!anyValue) {
-      portalFilters.geoBounds = null;
-      if (hint) hint.textContent = '';
-      runSearchForFilterChange();
-      return;
-    }
-
-    const normalized = normalizeGeoBounds(raw);
-    if (!normalized) {
-      if (hint) hint.textContent = 'Enter all four bounds with valid numeric values.';
-      return;
-    }
-
-    portalFilters.geoBounds = normalized;
-    if (hint) hint.textContent = `Filtering to lat ${normalized.minLatText}..${normalized.maxLatText}, lon ${normalized.minLonText}..${normalized.maxLonText}`;
-    syncUiFromState();
-    runSearchForFilterChange();
   }
 
   function initializeYearSlider() {
@@ -677,23 +659,36 @@
     if (initializedCustomControls) return;
 
     const $presence = $('input[name="presenceMode"]');
-    const $applyGeo = $('#applyGeoBounds');
     const $clearGeo = $('#clearGeoBounds');
     const $setGeoOnMap = $('#setGeoBoundsOnMap');
-    const $useMapBounds = $('#useMapBounds');
     const $traitModeSimple = $('#traitModeSimple');
     const $traitModeAll = $('#traitModeAll');
 
     window.onMapBBoxCleared = function () {
       if (!portalFilters.geoBounds) return;
       portalFilters.geoBounds = null;
-      const hint = document.getElementById('geoFilterHint');
-      if (hint) hint.textContent = 'Bounding box cleared.';
       syncUiFromState();
       runSearchForFilterChange();
     };
 
     initializeYearSlider();
+
+    $(document).off('click', '.filter-info-btn').on('click', '.filter-info-btn', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFilterHelpPopover(this);
+    });
+
+    $(document).off('click.filterInfoPopover').on('click.filterInfoPopover', function (event) {
+      if ($(event.target).closest('.facet-title-row').length) return;
+      closeAllFilterHelpPopovers();
+    });
+
+    $(document).off('keydown.filterInfoPopover').on('keydown.filterInfoPopover', function (event) {
+      if (event.key === 'Escape') {
+        closeAllFilterHelpPopovers();
+      }
+    });
 
     $traitModeSimple.on('click', function () {
       switchTraitMode('simple', { fromUser: true });
@@ -719,65 +714,32 @@
       runSearchForFilterChange();
     });
 
-    $applyGeo.on('click', function () {
-      applyGeoBoundsFromInputs();
-    });
-
     $clearGeo.on('click', function () {
       portalFilters.geoBounds = null;
       if (typeof window.clearSelectedBoundingBoxOverlay === 'function') {
         window.clearSelectedBoundingBoxOverlay();
       }
-      const hint = document.getElementById('geoFilterHint');
-      if (hint) hint.textContent = '';
       syncUiFromState();
       runSearchForFilterChange();
     });
 
     $setGeoOnMap.on('click', function () {
-      const hint = document.getElementById('geoFilterHint');
-      if (hint) {
-        hint.textContent = 'Map opened. Pan/zoom as needed, then drag directly on the map to draw your query boundary.';
-      }
-
       $('#showMap').trigger('click');
 
       window.setTimeout(function () {
         if (typeof window.startBoundingBoxSelection !== 'function') {
-          if (hint) hint.textContent = 'Bounding-box drawing is unavailable.';
           return;
         }
 
         window.startBoundingBoxSelection({
           onComplete: function (bounds) {
             portalFilters.geoBounds = normalizeGeoBounds(bounds);
-            if (hint && portalFilters.geoBounds) {
-              const b = portalFilters.geoBounds;
-              hint.textContent = `Bounds set from map: lat ${b.minLatText}..${b.maxLatText}, lon ${b.minLonText}..${b.maxLonText}`;
-            }
             syncUiFromState();
             runSearchForFilterChange();
           },
-          onCancel: function () {
-            if (hint) hint.textContent = 'Bounding-box selection canceled.';
-          },
+          onCancel: function () {},
         });
       }, 180);
-    });
-
-    $useMapBounds.on('click', function () {
-      if (!window.map || typeof window.map.getBounds !== 'function') return;
-      const b = window.map.getBounds();
-      portalFilters.geoBounds = normalizeGeoBounds({
-        minLat: b.getSouth(),
-        maxLat: b.getNorth(),
-        minLon: b.getWest(),
-        maxLon: b.getEast(),
-      });
-      const hint = document.getElementById('geoFilterHint');
-      if (hint) hint.textContent = 'Using current map viewport bounds.';
-      syncUiFromState();
-      runSearchForFilterChange();
     });
 
     initializedCustomControls = true;
@@ -906,6 +868,7 @@
       selectedFacets = window.selectedFacets;
 
       if (typeof window.scientificNameFilter !== 'undefined') window.scientificNameFilter = null;
+      if (typeof window.scientificNameSearchText !== 'undefined') window.scientificNameSearchText = '';
       if ($('#scientificNameSearch').length) $('#scientificNameSearch').val('');
 
       resetCustomFilters();
@@ -1006,16 +969,11 @@
 
     $('#dataSourceFacets').empty();
     $('#allTraitsFilters').empty();
-    $('#familyFacets').empty();
-    $('#genusFacets').empty();
 
     renderFacetLinks(aggregations.datasource_0, '#dataSourceFacets', 'dataSource');
 
     const traitAgg = { buckets: (aggregations?.mappedTraits_1?.buckets || []) };
     renderFacetLinks(traitAgg, '#allTraitsFilters', 'mappedTraits');
-
-    renderFacetLinks(aggregations.family_2, '#familyFacets', 'family');
-    renderFacetLinks(aggregations.genus_3, '#genusFacets', 'genus');
 
     updateTraitCountLookup(aggregations);
     renderPhenophaseFilters();

@@ -87,6 +87,71 @@
   margin-top: 20px;
 }
 
+.facet-title-row {
+  position: relative;
+  margin-top: 20px;
+}
+
+.facet-title-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.facet-title-row .facet-title {
+  margin-top: 0;
+}
+
+.filter-info-btn {
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2f5d7c;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.filter-info-btn:hover,
+.filter-info-btn:focus {
+  background: transparent;
+  outline: none;
+}
+
+.filter-help-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  max-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid #c8d5df;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.filter-help-popover::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 20px;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-top: 1px solid #c8d5df;
+  border-left: 1px solid #c8d5df;
+  transform: rotate(45deg);
+}
+
 .facet-link {
   display: block;
   margin-bottom: 10px;
@@ -425,35 +490,28 @@ html, body { color: #000 !important; background: #fff; }
   margin-top: 6px;
 }
 
-.geo-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 8px;
-}
-
 .geo-actions {
-  margin-top: 8px;
+  margin-top: 2px;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.map-bounds-btn {
-  margin-top: 8px;
-}
-
 .map-draw-help {
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
-  max-width: 360px;
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
+  width: min(560px, calc(100% - 32px));
+  background: rgba(255, 255, 255, 0.96);
+  color: #111;
+  border: 1px solid #d1d5db;
   font-size: 12px;
   line-height: 1.4;
-  padding: 8px 10px;
-  border-radius: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: center;
 }
 
 .bbox-tool-control a {
@@ -486,17 +544,19 @@ html, body { color: #000 !important; background: #fff; }
 
 .map-load-status {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
-  max-width: 420px;
+  width: min(560px, calc(100% - 32px));
   background: rgba(255, 255, 255, 0.94);
   color: #111;
   border: 1px solid #d1d5db;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 12px;
   line-height: 1.4;
-  padding: 6px 8px;
+  padding: 8px 12px;
+  text-align: center;
 }
 
 .map-load-status.error {

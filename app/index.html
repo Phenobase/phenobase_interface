@@ -31,25 +31,41 @@
         <img src='banner.png' width=100%>
 
 
-        <!-- Faceted Search Section -->
-        <div class="facet-title">Search by Scientific Name</div>
-        <div class="search-container">
-          <input type="text" id="scientificNameSearch" placeholder="Enter scientific name">
-          <button id="searchButton">Go</button>
-        </div>
-
         <!-- Dynamic facets will be populated here -->
-        <div class="facet-title">Data Source</div>
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Data Source</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpDataSource" aria-controls="helpDataSource" aria-expanded="false" aria-label="Data source filter help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpDataSource" class="filter-help-popover" role="tooltip" hidden>Filter by one or more record providers.</div>
+        </div>
         <div id="dataSourceFacets"></div>
 
-        <div class="facet-title">Date Range</div>
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Year Range</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpDateRange" aria-controls="helpDateRange" aria-expanded="false" aria-label="Date range filter help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpDateRange" class="filter-help-popover" role="tooltip" hidden>Use the slider to filter observations by year.</div>
+        </div>
         <div class="date-range-controls">
-          <div class="filter-label">Year range</div>
           <div id="yearRangeSlider"></div>
           <div id="yearRangeDisplay" class="filter-hint"></div>
         </div>
 
-        <div class="facet-title">Presence</div>
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Presence</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpPresence" aria-controls="helpPresence" aria-expanded="false" aria-label="Presence filter help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpPresence" class="filter-help-popover" role="tooltip" hidden>Choose present, absent, or both. Some sources only provide present records.</div>
+        </div>
         <fieldset id="presenceModeGroup" class="presence-controls">
           <label><input type="radio" name="presenceMode" value="both" checked> Both</label>
           <label><input type="radio" name="presenceMode" value="present"> Present</label>
@@ -57,7 +73,15 @@
         </fieldset>
         <div id="presenceModeHint" class="text-muted filter-hint" style="display:none;"></div>
 
-        <div class="facet-title">Phenophase Categories</div>
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Phenophase Categories</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpPhenophase" aria-controls="helpPhenophase" aria-expanded="false" aria-label="Phenophase filter help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpPhenophase" class="filter-help-popover" role="tooltip" hidden>Simple terms shows grouped phenophases. All traits shows the full trait list.</div>
+        </div>
         <div class="trait-mode-toggle">
           <button id="traitModeSimple" class="btn btn-default btn-sm active" type="button">Simple terms</button>
           <button id="traitModeAll" class="btn btn-default btn-sm" type="button">All traits</button>
@@ -66,32 +90,36 @@
         <div id="phenophaseFilters"></div>
         <div id="allTraitsFilters" style="display:none;"></div>
 
-        <div class="facet-title">Geographic Filter</div>
-        <div class="geo-filter-controls">
-          <div class="geo-grid">
-            <label for="geoMinLat" class="filter-label">Min latitude</label>
-            <input type="number" step="0.0001" id="geoMinLat" class="filter-input" placeholder="-90">
-            <label for="geoMaxLat" class="filter-label">Max latitude</label>
-            <input type="number" step="0.0001" id="geoMaxLat" class="filter-input" placeholder="90">
-            <label for="geoMinLon" class="filter-label">Min longitude</label>
-            <input type="number" step="0.0001" id="geoMinLon" class="filter-input" placeholder="-180">
-            <label for="geoMaxLon" class="filter-label">Max longitude</label>
-            <input type="number" step="0.0001" id="geoMaxLon" class="filter-input" placeholder="180">
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Search by Scientific Name</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpScientificName" aria-controls="helpScientificName" aria-expanded="false" aria-label="Scientific name search help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
           </div>
-          <div class="geo-actions">
-            <button id="applyGeoBounds" class="btn btn-default btn-sm" type="button">Apply bounds</button>
-            <button id="clearGeoBounds" class="btn btn-default btn-sm" type="button">Clear</button>
-            <button id="setGeoBoundsOnMap" class="btn btn-default btn-sm" type="button">Set bounds on map</button>
-          </div>
-          <button id="useMapBounds" class="btn btn-default btn-sm map-bounds-btn" type="button">Use current map view</button>
-          <div id="geoFilterHint" class="text-muted filter-hint"></div>
+          <div id="helpScientificName" class="filter-help-popover" role="tooltip" hidden>Search by plant family, genus, or full scientific name.</div>
+        </div>
+        <div class="search-container">
+          <input type="text" id="scientificNameSearch" placeholder="Family, genus, or scientific name">
+          <button id="searchButton">Go</button>
         </div>
 
-        <div class="facet-title">Family</div>
-        <div id="familyFacets"></div>
-
-        <div class="facet-title">Genus</div>
-        <div id="genusFacets"></div>
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Geographic Filter</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpGeoFilter" aria-controls="helpGeoFilter" aria-expanded="false" aria-label="Geographic filter help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpGeoFilter" class="filter-help-popover" role="tooltip" hidden>Draw a bounding box on the map to filter results. After changing bounds, click "Show Results" on the map to refresh the map view.</div>
+        </div>
+        <div class="geo-filter-controls">
+          <div class="geo-actions">
+            <button id="setGeoBoundsOnMap" class="btn btn-default btn-sm" type="button">Set bounds on map</button>
+            <button id="clearGeoBounds" class="btn btn-default btn-sm" type="button">Clear</button>
+          </div>
+          <div id="geoFilterHint" class="text-muted filter-hint"></div>
+        </div>
 
         <!-- Container for displaying selected facets -->
         <div id="selectedFacets" class="selected-facets-container"></div>

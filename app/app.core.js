@@ -24,6 +24,8 @@ var requestData = {
 
 var selectedFacets = {};
 var scientificNameFilter = null;
+var scientificNameSearchText = "";
+window.scientificNameSearchText = scientificNameSearchText;
 
 // NEW: Field-level AND/OR modes
 const facetModes = {
@@ -190,9 +192,23 @@ function updateDownloadLink() {
   downloadLink = `${queryStringRootURL}${encodeURIComponent(luceneQuery)}&limit=100000`;
   $("#downloadButton").attr("href", downloadLink).attr("download", "phenobase_data.json").prop("disabled", false);
 }
+function buildScientificSearchFilter(searchTerm) {
+  return {
+    bool: {
+      should: [
+        { match: { scientificName: searchTerm } },
+        { match: { genus: searchTerm } },
+        { match: { family: searchTerm } },
+      ],
+      minimum_should_match: 1,
+    },
+  };
+}
 function handleScientificNameSearch() {
-  var scientificName = $("#scientificNameSearch").val().trim();
-  scientificName ? (scientificNameFilter = { match: { scientificName } }) : (scientificNameFilter = null);
+  const scientificName = $("#scientificNameSearch").val().trim();
+  scientificNameSearchText = scientificName;
+  window.scientificNameSearchText = scientificNameSearchText;
+  scientificNameFilter = scientificName ? buildScientificSearchFilter(scientificName) : null;
   updateQueryWithSelectedFacets(); fetchResults();
 }
 

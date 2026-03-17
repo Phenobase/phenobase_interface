@@ -34,8 +34,6 @@ var bboxToolContainer = null;
 var bboxToolArmButton = null;
 var bboxToolCancelButton = null;
 var bboxToolRenderButton = null;
-var bboxToolHintPopup = null;
-
 var bboxDraw = {
   workflowActive: false,
   armed: false,
@@ -228,7 +226,7 @@ function markMapNeedsRender() {
   }
 
   if (!mapLoadState.loading && !mapLoadState.completed) {
-    setMapLoadStatus(`Click \"Render Results\" to draw up to ${MAP_MAX_POINTS.toLocaleString()} points for current filters.`);
+    setMapLoadStatus(`Click \"Show Results\" to update the map interface for the current filters and bounds.`);
   }
 }
 
@@ -324,32 +322,13 @@ async function loadMapDataIncrementally(force) {
   const loadedTxt = mapLoadState.loadedRecords.toLocaleString();
   const dotsTxt = mapLoadState.uniqueDots.toLocaleString();
 
-  if (reachedMax) {
+  if (!loaded) {
+    setMapLoadStatus('No records found for the current filters and bounds. After changing filters or drawing a new area, click "Show Results" to update the map interface.');
+  } else if (reachedMax) {
     setMapLoadStatus(`Loaded first ${loadedTxt} records as ${dotsTxt} dots (map cap: ${MAP_MAX_POINTS.toLocaleString()}).`);
   } else {
     setMapLoadStatus(`Loaded ${loadedTxt} records as ${dotsTxt} dots.`);
   }
-}
-
-function closeBBoxHintPopup() {
-  if (!bboxToolHintPopup) return;
-  map.removeLayer(bboxToolHintPopup);
-  bboxToolHintPopup = null;
-}
-
-function showBBoxToolPopup() {
-  closeBBoxHintPopup();
-  const toolLatLng = map.containerPointToLatLng([120, 44]);
-  bboxToolHintPopup = L.popup({
-    closeButton: true,
-    autoClose: false,
-    closeOnClick: false,
-    className: 'bbox-hint-popup',
-    offset: [0, 0],
-  })
-    .setLatLng(toolLatLng)
-    .setContent('Drag on the map to draw bounds. You can also toggle <strong>BBox</strong> in the top-left controls.')
-    .addTo(map);
 }
 
 function setMapDragEnabled(enabled) {
@@ -397,8 +376,8 @@ function updateBBoxControlButtons() {
   bboxToolCancelButton.textContent = 'Clear BBox';
   bboxToolCancelButton.title = 'Clear the drawn bounding box';
   bboxToolCancelButton.style.display = hasBBox ? '' : 'none';
-  bboxToolRenderButton.textContent = 'Render Results';
-  bboxToolRenderButton.title = `Render up to ${MAP_MAX_POINTS.toLocaleString()} points for current filters`;
+  bboxToolRenderButton.textContent = 'Show Results';
+  bboxToolRenderButton.title = `Show up to ${MAP_MAX_POINTS.toLocaleString()} points for current filters`;
 }
 
 function setBBoxArmed(armed) {
@@ -410,7 +389,6 @@ function setBBoxArmed(armed) {
 
   if (shouldArm) {
     setMapDragEnabled(false);
-    closeBBoxHintPopup();
     showMapHelp('BBox tool enabled: click and drag on the map to draw your query boundary. Release to set bounds.');
   } else {
     setMapDragEnabled(true);
@@ -446,7 +424,6 @@ function clearBoundingBoxWorkflowState() {
   setBBoxArmed(false);
 
   hideMapHelp();
-  closeBBoxHintPopup();
   setBBoxControlVisibility(true);
   updateBBoxControlButtons();
 }
@@ -572,7 +549,7 @@ function ensureBBoxToolControl() {
 
     const renderBtn = L.DomUtil.create('a', 'bbox-tool-render', container);
     renderBtn.href = '#';
-    renderBtn.textContent = 'Render Results';
+    renderBtn.textContent = 'Show Results';
 
     L.DomEvent.disableClickPropagation(container);
 
@@ -637,7 +614,6 @@ function startBoundingBoxSelection(optionsOrCallback, maybeOnCancel) {
   map.invalidateSize();
 
   showMapHelp('Pan/zoom map as needed, then drag directly on map to set bounds. Press Esc to cancel.');
-  showBBoxToolPopup();
 }
 
 window.startBoundingBoxSelection = startBoundingBoxSelection;
