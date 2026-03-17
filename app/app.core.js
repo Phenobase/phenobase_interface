@@ -6,6 +6,11 @@ let pageSize = 15;
 var apiUrl = `https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=${pageSize}&from=0`;
 var queryStringRootURL = "https://biscicol.org/phenobase/api/v1/download/_search?q=";
 var downloadLink = "";
+const defaultTimeConfig = window.phenobaseTimeConfig || {};
+const DEFAULT_MIN_YEAR = Number.isFinite(Number(defaultTimeConfig.minYear)) ? Math.round(Number(defaultTimeConfig.minYear)) : 1800;
+const DEFAULT_MAX_YEAR = Number.isFinite(Number(defaultTimeConfig.maxYear)) ? Math.round(Number(defaultTimeConfig.maxYear)) : new Date().getFullYear();
+const DEFAULT_MIN_DECADE = Math.floor(DEFAULT_MIN_YEAR / 10) * 10;
+const DEFAULT_MAX_DECADE = Math.floor(DEFAULT_MAX_YEAR / 10) * 10;
 
 // Hidden mapped trait
 const HIDDEN_TRAIT = 'plant structure present';
@@ -17,7 +22,15 @@ var requestData = {
     datasource_0: { terms: { field: "dataSource", size: 10 } },
     mappedTraits_1: { terms: { field: "mappedTraits", size: 2000 } },
     family_2: { terms: { field: "family", size: 50 } },
-    genus_3: { terms: { field: "genus", size: 50 } }
+    genus_3: { terms: { field: "genus", size: 50 } },
+    decade_4: {
+      histogram: {
+        field: "decadeStart",
+        interval: 10,
+        min_doc_count: 0,
+        extended_bounds: { min: DEFAULT_MIN_DECADE, max: DEFAULT_MAX_DECADE }
+      }
+    }
   },
   query: { bool: { must: [] } }
 };
@@ -209,7 +222,12 @@ function handleScientificNameSearch() {
   scientificNameSearchText = scientificName;
   window.scientificNameSearchText = scientificNameSearchText;
   scientificNameFilter = scientificName ? buildScientificSearchFilter(scientificName) : null;
-  updateQueryWithSelectedFacets(); fetchResults();
+  if (typeof window.updateQueryWithSelectedFacets === 'function') {
+    window.updateQueryWithSelectedFacets();
+  } else {
+    updateQueryWithSelectedFacets();
+  }
+  fetchResults();
 }
 
 // Fetch & render
@@ -348,6 +366,13 @@ function updateQueryWithSelectedFacets() {
 
 // UI hooks
 $(document).ready(function () {
+  if (typeof window.initializePortalFiltersFromUrl === 'function') {
+    window.initializePortalFiltersFromUrl();
+  }
+  if (typeof window.updateQueryWithSelectedFacets === 'function') {
+    window.updateQueryWithSelectedFacets();
+  }
+
   // Initial: if table is visible on load, compute dynamic size first
   if ($('#tableContainer').is(':visible')) {
     // wait a tick for layout to settle

@@ -14,7 +14,7 @@ var mapDotRenderer = L.canvas({ padding: 0.4 });
 
 const MAP_MAX_POINTS = 10000;
 const MAP_BATCH_SIZE = 2000;
-const MAP_SOURCE_FIELDS = ["latitude", "longitude", "scientificName", "mappedTraits", "year", "dataSource"];
+const MAP_SOURCE_FIELDS = ["latitude", "longitude", "scientificName", "mappedTraits", "year", "dataSource", "observedMetadataUrl", "annotationID"];
 
 var mapLoadState = {
   runId: 0,
@@ -35,7 +35,7 @@ var bboxToolArmButton = null;
 var bboxToolCancelButton = null;
 var bboxToolRenderButton = null;
 var bboxDraw = {
-  workflowActive: false,
+  workflowActive: true,
   armed: false,
   drawing: false,
   startLatLng: null,
@@ -52,7 +52,8 @@ function getMapHelpEl() {
 function showMapHelp(message) {
   const help = getMapHelpEl();
   if (!help) return;
-  help.textContent = message;
+  const text = document.getElementById('mapDrawHelpText');
+  if (text) text.textContent = message;
   help.style.display = 'block';
 }
 
@@ -60,7 +61,8 @@ function hideMapHelp() {
   const help = getMapHelpEl();
   if (!help) return;
   help.style.display = 'none';
-  help.textContent = '';
+  const text = document.getElementById('mapDrawHelpText');
+  if (text) text.textContent = '';
 }
 
 function getMapLoadStatusEl() {
@@ -70,15 +72,33 @@ function getMapLoadStatusEl() {
 function setMapLoadStatus(message, isError) {
   const el = getMapLoadStatusEl();
   if (!el) return;
+  const text = document.getElementById('mapLoadStatusText');
   if (!message) {
-    el.textContent = '';
+    if (text) text.textContent = '';
     el.style.display = 'none';
     el.classList.remove('error');
     return;
   }
-  el.textContent = message;
+  if (text) text.textContent = message;
   el.style.display = 'block';
   el.classList.toggle('error', !!isError);
+}
+
+function bindMapMessageDismissButtons() {
+  const helpClose = document.getElementById('mapDrawHelpClose');
+  const statusClose = document.getElementById('mapLoadStatusClose');
+
+  if (helpClose && !helpClose.dataset.bound) {
+    helpClose.addEventListener('click', hideMapHelp);
+    helpClose.dataset.bound = 'true';
+  }
+
+  if (statusClose && !statusClose.dataset.bound) {
+    statusClose.addEventListener('click', function () {
+      setMapLoadStatus('');
+    });
+    statusClose.dataset.bound = 'true';
+  }
 }
 
 function getMapQuerySignature() {
@@ -124,11 +144,32 @@ function dotRadius(count) {
   return 2.5;
 }
 
+function observationMetadataUrlFromSource(src) {
+  const urlFromDoc = String(src?.observedMetadataUrl || '').trim();
+  if (urlFromDoc) return urlFromDoc;
+
+  const rawId = src?.annotationID;
+  const npnId = (typeof rawId === 'string' && rawId.startsWith('npn:')) ? rawId.slice(4) : null;
+  if (npnId) {
+    return `https://services.usanpn.org/npn_portal/observations/getObservationById.json?request_src=PPO&observation_id=${encodeURIComponent(npnId)}&pretty=1`;
+  }
+
+  return '';
+}
+
 function dotPopupHtml(info) {
   const count = Number(info.count || 0).toLocaleString();
   const sampleName = info.sampleScientificName ? `<div><strong>Example:</strong> ${info.sampleScientificName}</div>` : '';
   const sampleSource = info.sampleSource ? `<div><strong>Source:</strong> ${info.sampleSource}</div>` : '';
-  return `<div><strong>${count}</strong> records at this location${sampleName}${sampleSource}</div>`;
+  const metadataUrl = String(info.sampleMetadataUrl || '').trim();
+  const metadataLabel = (Number(info.count || 0) > 1) ? 'Example observation metadata' : 'Observation metadata';
+  const metadataHtml = metadataUrl
+    ? `<div><a href="${metadataUrl}" target="_blank" rel="noopener noreferrer">${metadataLabel}</a></div>`
+    : `<div>${metadataLabel} unavailable</div>`;
+  const multipleRecordsNote = (Number(info.count || 0) > 1)
+    ? '<div><em>Multiple records share this location; link shown is for one example record.</em></div>'
+    : '';
+  return `<div><strong>${count}</strong> records at this location${sampleName}${sampleSource}${metadataHtml}${multipleRecordsNote}</div>`;
 }
 
 function clearMapDots() {
@@ -153,6 +194,7 @@ function addDotForSource(lat, lon, src) {
     count: 1,
     sampleScientificName: String(src?.scientificName || ''),
     sampleSource: String(src?.dataSource || ''),
+    sampleMetadataUrl: observationMetadataUrlFromSource(src),
     marker: null,
   };
 
@@ -418,7 +460,6 @@ function detachDrawHandlers() {
 
 function clearBoundingBoxWorkflowState() {
   resetTransientDrawState();
-  bboxDraw.workflowActive = false;
   bboxDraw.onComplete = null;
   bboxDraw.onCancel = null;
   setBBoxArmed(false);
@@ -458,6 +499,8 @@ function updatePreviewRectangle(latlng) {
       weight: 2,
       dashArray: '4 4',
       fillOpacity: 0.06,
+      interactive: false,
+      bubblingMouseEvents: false,
     }).addTo(map);
   } else {
     bboxDraw.previewRectangle.setBounds(bounds);
@@ -475,12 +518,18 @@ function completeBoundingBoxSelection(latlng) {
     color: '#0b7285',
     weight: 2,
     fillOpacity: 0.04,
+    interactive: false,
+    bubblingMouseEvents: false,
   }).addTo(map);
 
   const onComplete = bboxDraw.onComplete;
   clearBoundingBoxWorkflowState();
 
-  if (typeof onComplete === 'function') onComplete(normalized);
+  if (typeof onComplete === 'function') {
+    onComplete(normalized);
+  } else if (typeof window.onMapBBoxSelected === 'function') {
+    window.onMapBBoxSelected(normalized);
+  }
 }
 
 function ensureDrawHandlersAttached() {
@@ -489,9 +538,6 @@ function ensureDrawHandlersAttached() {
   drawHandlers = {
     mousedown: function (e) {
       if (!bboxDraw.workflowActive) return;
-      if (!bboxDraw.armed) {
-        setBBoxArmed(true);
-      }
       if (!bboxDraw.armed) return;
       if (e.originalEvent) {
         L.DomEvent.preventDefault(e.originalEvent);
@@ -556,7 +602,6 @@ function ensureBBoxToolControl() {
     L.DomEvent.on(armBtn, 'click', function (e) {
       L.DomEvent.preventDefault(e);
       L.DomEvent.stopPropagation(e);
-      if (!bboxDraw.workflowActive) return;
       setBBoxArmed(!bboxDraw.armed);
     });
 
@@ -595,19 +640,18 @@ function startBoundingBoxSelection(optionsOrCallback, maybeOnCancel) {
     options = optionsOrCallback;
   }
 
-  if (bboxDraw.workflowActive) cancelBoundingBoxSelection(false);
-
   ensureBBoxToolControl();
   ensureDrawHandlersAttached();
 
-  bboxDraw.workflowActive = true;
+  if (bboxDraw.workflowActive && bboxDraw.armed) cancelBoundingBoxSelection(false);
+
   bboxDraw.onComplete = (typeof options.onComplete === 'function') ? options.onComplete : null;
   bboxDraw.onCancel = (typeof options.onCancel === 'function') ? options.onCancel : null;
 
   resetTransientDrawState();
   setMapDragEnabled(true);
   setBBoxControlVisibility(true);
-  setBBoxArmed(false);
+  setBBoxArmed(true);
   updateBBoxControlButtons();
 
   map.closePopup();
@@ -624,6 +668,8 @@ window.cancelMapDataLoading = cancelMapDataLoading;
 window.markMapNeedsRender = markMapNeedsRender;
 
 ensureBBoxToolControl();
+ensureDrawHandlersAttached();
+bindMapMessageDismissButtons();
 markMapNeedsRender();
 
 // Legacy fallback renderer (current page only)

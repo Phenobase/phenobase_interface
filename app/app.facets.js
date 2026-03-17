@@ -8,9 +8,16 @@
   // Shared / globals
   // -----------------------
   const HIDDEN_TRAIT = 'plant structure present';
-  const MIN_YEAR = 1800;
-  const CURRENT_YEAR = new Date().getFullYear();
+  const TIME_CONFIG = window.phenobaseTimeConfig || {};
+  const MIN_YEAR = Number.isFinite(Number(TIME_CONFIG.minYear)) ? Math.round(Number(TIME_CONFIG.minYear)) : 1800;
+  const CURRENT_YEAR = Number.isFinite(Number(TIME_CONFIG.maxYear)) ? Math.round(Number(TIME_CONFIG.maxYear)) : new Date().getFullYear();
+  const MIN_DECADE_START = Math.floor(MIN_YEAR / 10) * 10;
+  const MAX_DECADE_START = Math.floor(CURRENT_YEAR / 10) * 10;
   const PRESENT_ONLY_SOURCE_MATCHERS = [/\binaturalist\b/i, /\bherbarium-?gbif\b/i, /\bgbif\b/i, /\binat\b/i];
+  const DECADE_STARTS = [];
+  for (let year = MIN_DECADE_START; year <= MAX_DECADE_START; year += 10) {
+    DECADE_STARTS.push(year);
+  }
 
   const PHENOPHASE_CATEGORIES = [
     {
@@ -45,8 +52,8 @@
 
   window.portalFilters = window.portalFilters || {
     presenceMode: 'both',
-    minYear: MIN_YEAR,
-    maxYear: CURRENT_YEAR,
+    decadeStart: MIN_DECADE_START,
+    decadeEnd: MAX_DECADE_START,
     selectedPhenophases: [],
     geoBounds: null,
     traitMode: 'simple',
@@ -54,22 +61,29 @@
   const portalFilters = window.portalFilters;
 
   // Backward-compatible migration from old state fields.
-  if (!Number.isInteger(portalFilters.minYear)) {
-    const migratedStart = Number(String(portalFilters.dateStart || '').slice(0, 4));
-    portalFilters.minYear = Number.isInteger(migratedStart) ? migratedStart : MIN_YEAR;
+  if (!Number.isInteger(portalFilters.decadeStart)) {
+    const legacyStart = Number.isInteger(portalFilters.minYear)
+      ? portalFilters.minYear
+      : Number(String(portalFilters.dateStart || '').slice(0, 4));
+    portalFilters.decadeStart = Number.isFinite(legacyStart) ? Math.floor(legacyStart / 10) * 10 : MIN_DECADE_START;
   }
-  if (!Number.isInteger(portalFilters.maxYear)) {
-    const migratedEnd = Number(String(portalFilters.dateEnd || '').slice(0, 4));
-    portalFilters.maxYear = Number.isInteger(migratedEnd) ? migratedEnd : CURRENT_YEAR;
+  if (!Number.isInteger(portalFilters.decadeEnd)) {
+    const legacyEnd = Number.isInteger(portalFilters.maxYear)
+      ? portalFilters.maxYear
+      : Number(String(portalFilters.dateEnd || '').slice(0, 4));
+    portalFilters.decadeEnd = Number.isFinite(legacyEnd) ? Math.floor(legacyEnd / 10) * 10 : MAX_DECADE_START;
   }
   if (!portalFilters.traitMode) {
     portalFilters.traitMode = portalFilters.advancedTraitsVisible ? 'all' : 'simple';
   }
+  delete portalFilters.minYear;
+  delete portalFilters.maxYear;
   delete portalFilters.dateStart;
   delete portalFilters.dateEnd;
   delete portalFilters.advancedTraitsVisible;
 
   const availableTraitCountsLC = new Map();
+  const decadeCountsByStart = new Map();
   const FACET_PREVIEW_LIMITS = { family: 5, genus: 5 };
   const facetExpandedState = { family: false, genus: false };
   let initializedCustomControls = false;
@@ -77,6 +91,7 @@
   let presenceModeLocked = false;
   let lastUnlockedPresenceMode = portalFilters.presenceMode || 'both';
   let traitModeWarningTimer = null;
+  let maxDecadeCount = 0;
 
   // -----------------------
   // Helpers
@@ -109,34 +124,81 @@
     if (typeof window.fetchResults === 'function') {
       window.fetchResults();
     }
+    if ($('#statsContainer').is(':visible') && typeof window.fetchStatsData === 'function') {
+      window.fetchStatsData();
+    }
   }
 
-  function clampYear(value, fallback) {
+  function clampDecadeStart(value, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
-    return Math.max(MIN_YEAR, Math.min(CURRENT_YEAR, Math.round(n)));
+    const decade = Math.floor(n / 10) * 10;
+    return Math.max(MIN_DECADE_START, Math.min(MAX_DECADE_START, decade));
   }
 
-  function getYearRangeFromState() {
-    let minYear = clampYear(portalFilters.minYear, MIN_YEAR);
-    let maxYear = clampYear(portalFilters.maxYear, CURRENT_YEAR);
-    if (minYear > maxYear) [minYear, maxYear] = [maxYear, minYear];
-    portalFilters.minYear = minYear;
-    portalFilters.maxYear = maxYear;
-    return { minYear, maxYear };
+  function formatDecadeLabel(decadeStart) {
+    return `${decadeStart}s`;
   }
 
-  function isFullYearRange() {
-    const r = getYearRangeFromState();
-    return r.minYear <= MIN_YEAR && r.maxYear >= CURRENT_YEAR;
+  function decadeSelectionLabel(range) {
+    const selection = range || getDecadeRangeFromState();
+    if (selection.decadeStart === selection.decadeEnd) return formatDecadeLabel(selection.decadeStart);
+    return `${formatDecadeLabel(selection.decadeStart)}-${formatDecadeLabel(selection.decadeEnd)}`;
+  }
+
+  function getDecadeIndex(decadeStart) {
+    return Math.max(0, DECADE_STARTS.indexOf(decadeStart));
+  }
+
+  function getDecadeRangeFromState() {
+    let decadeStart = clampDecadeStart(portalFilters.decadeStart, MIN_DECADE_START);
+    let decadeEnd = clampDecadeStart(portalFilters.decadeEnd, MAX_DECADE_START);
+    if (decadeStart > decadeEnd) [decadeStart, decadeEnd] = [decadeEnd, decadeStart];
+    portalFilters.decadeStart = decadeStart;
+    portalFilters.decadeEnd = decadeEnd;
+    return {
+      decadeStart,
+      decadeEnd,
+      decadeStartIndex: getDecadeIndex(decadeStart),
+      decadeEndIndex: getDecadeIndex(decadeEnd),
+      yearStart: decadeStart,
+      yearEnd: decadeEnd + 9,
+    };
+  }
+
+  function isFullDecadeRange() {
+    const r = getDecadeRangeFromState();
+    return r.decadeStart <= MIN_DECADE_START && r.decadeEnd >= MAX_DECADE_START;
+  }
+
+  function syncDecadeRangeToUrl() {
+    if (!(window.history && window.history.replaceState)) return;
+
+    const selection = getDecadeRangeFromState();
+    const params = new URLSearchParams(window.location.search);
+    params.set('decadeStart', String(selection.decadeStart));
+    params.set('decadeEnd', String(selection.decadeEnd));
+
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }
+
+  function initializePortalFiltersFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('decadeStart') && !params.has('decadeEnd')) return;
+
+    portalFilters.decadeStart = clampDecadeStart(params.get('decadeStart'), MIN_DECADE_START);
+    portalFilters.decadeEnd = clampDecadeStart(params.get('decadeEnd'), MAX_DECADE_START);
+    getDecadeRangeFromState();
   }
 
   function updateYearRangeDisplay() {
     const el = document.getElementById('yearRangeDisplay');
     if (!el) return;
-    const r = getYearRangeFromState();
-    const suffix = isFullYearRange() ? ' (all years)' : '';
-    el.textContent = `${r.minYear} - ${r.maxYear}${suffix}`;
+    const selection = getDecadeRangeFromState();
+    const suffix = isFullDecadeRange() ? ' (all decades)' : '';
+    el.textContent = `Selected: ${decadeSelectionLabel(selection)}${suffix}`;
   }
 
   function presentOnlySource(sourceName) {
@@ -326,9 +388,9 @@
       parts.push(`${fieldLabel}: ${formatList(normalized, 2)}`);
     });
 
-    if (!isFullYearRange()) {
-      const r = getYearRangeFromState();
-      parts.push(`Year: ${r.minYear}-${r.maxYear}`);
+    if (!isFullDecadeRange()) {
+      const selection = getDecadeRangeFromState();
+      parts.push(`Decade: ${decadeSelectionLabel(selection)}`);
     }
 
     const presenceMode = (portalFilters.presenceMode || 'both').toLowerCase();
@@ -383,9 +445,9 @@
   }
 
   function buildDateRangeClause() {
-    const r = getYearRangeFromState();
-    if (r.minYear <= MIN_YEAR && r.maxYear >= CURRENT_YEAR) return null;
-    return { range: { year: { gte: r.minYear, lte: r.maxYear } } };
+    const selection = getDecadeRangeFromState();
+    if (selection.decadeStart <= MIN_DECADE_START && selection.decadeEnd >= MAX_DECADE_START) return null;
+    return { range: { decadeStart: { gte: selection.decadeStart, lte: selection.decadeEnd } } };
   }
 
   function buildPresenceClause() {
@@ -443,31 +505,58 @@
     syncPresenceModeFromSelectedSources();
 
     const must = [];
+    const nonTemporalMust = [];
 
-    must.push(...buildFacetMustClauses());
+    const facetMust = buildFacetMustClauses();
+    must.push(...facetMust);
+    nonTemporalMust.push(...facetMust);
 
     if (window.scientificNameFilter) {
       must.push(window.scientificNameFilter);
+      nonTemporalMust.push(window.scientificNameFilter);
     }
 
     const dateClause = buildDateRangeClause();
     if (dateClause) must.push(dateClause);
 
     const presenceClause = buildPresenceClause();
-    if (presenceClause) must.push(presenceClause);
+    if (presenceClause) {
+      must.push(presenceClause);
+      nonTemporalMust.push(presenceClause);
+    }
 
     const phenophaseClause = buildPhenophaseClause();
-    if (phenophaseClause) must.push(phenophaseClause);
+    if (phenophaseClause) {
+      must.push(phenophaseClause);
+      nonTemporalMust.push(phenophaseClause);
+    }
 
-    must.push(...buildGeoRangeClauses());
+    const geoClauses = buildGeoRangeClauses();
+    must.push(...geoClauses);
+    nonTemporalMust.push(...geoClauses);
 
     rd.query = must.length ? { bool: { must } } : { match_all: {} };
+    rd.aggs = rd.aggs || {};
+    rd.aggs.decade_4 = {
+      filter: nonTemporalMust.length ? { bool: { must: nonTemporalMust } } : { match_all: {} },
+      aggs: {
+        decades: {
+          histogram: {
+            field: 'decadeStart',
+            interval: 10,
+            min_doc_count: 0,
+            extended_bounds: { min: MIN_DECADE_START, max: MAX_DECADE_START },
+          },
+        },
+      },
+    };
     window.requestData = rd;
 
     if (typeof window.updateDownloadLink === 'function') {
       window.updateDownloadLink();
     }
 
+    syncDecadeRangeToUrl();
     updateQuerySummary();
   }
 
@@ -500,6 +589,7 @@
   window.addFacet = addFacet;
   window.removeFacet = removeFacet;
   window.updateQueryWithSelectedFacets = updateQueryWithSelectedFacets;
+  window.initializePortalFiltersFromUrl = initializePortalFiltersFromUrl;
 
   // -----------------------
   // Presence mode locking
@@ -588,6 +678,73 @@
     container.innerHTML = html;
   }
 
+  function decadeCountFor(decadeStart) {
+    return decadeCountsByStart.get(decadeStart) || 0;
+  }
+
+  function updateDecadeCountLookup(aggregations) {
+    decadeCountsByStart.clear();
+    DECADE_STARTS.forEach((decadeStart) => decadeCountsByStart.set(decadeStart, 0));
+
+    const buckets = aggregations?.decade_4?.decades?.buckets || aggregations?.decade_4?.buckets || [];
+    buckets.forEach((bucket) => {
+      const decadeStart = Math.floor(Number(bucket?.key) / 10) * 10;
+      if (!decadeCountsByStart.has(decadeStart)) return;
+      decadeCountsByStart.set(decadeStart, bucket?.doc_count || 0);
+    });
+
+    maxDecadeCount = Math.max(0, ...Array.from(decadeCountsByStart.values()));
+  }
+
+  function decadeLabelStride() {
+    if (DECADE_STARTS.length <= 10) return 1;
+    if (DECADE_STARTS.length <= 16) return 2;
+    if (DECADE_STARTS.length <= 24) return 3;
+    return 4;
+  }
+
+  function updateDecadeSliderAccessibility() {
+    const selection = getDecadeRangeFromState();
+    const values = [selection.decadeStart, selection.decadeEnd];
+
+    $('#yearRangeSlider .ui-slider-handle').each(function (index) {
+      const decadeStart = values[index];
+      const count = decadeCountFor(decadeStart);
+      const label = formatDecadeLabel(decadeStart);
+      const thumbLabel = index === 0 ? 'Start decade' : 'End decade';
+      const countLabel = `${count.toLocaleString()} record${count === 1 ? '' : 's'}`;
+      this.setAttribute('aria-label', thumbLabel);
+      this.setAttribute('aria-valuetext', `${label}, ${countLabel}`);
+      this.setAttribute('title', `${thumbLabel}: ${label} (${countLabel})`);
+    });
+  }
+
+  function renderDecadeMarks() {
+    const container = document.getElementById('yearRangeMarks');
+    if (!container) return;
+
+    const selection = getDecadeRangeFromState();
+    const stride = decadeLabelStride();
+
+    container.innerHTML = DECADE_STARTS.map((decadeStart, index) => {
+      const count = decadeCountFor(decadeStart);
+      const barHeight = maxDecadeCount ? Math.max(2, Math.round((count / maxDecadeCount) * 18)) : 2;
+      const isSelected = decadeStart >= selection.decadeStart && decadeStart <= selection.decadeEnd;
+      const showLabel = index === 0 || index === DECADE_STARTS.length - 1 || index % stride === 0 || isSelected;
+      const label = showLabel ? formatDecadeLabel(decadeStart) : '';
+      const title = `${formatDecadeLabel(decadeStart)}: ${count.toLocaleString()} record${count === 1 ? '' : 's'}`;
+
+      return `
+        <div class="decade-mark ${isSelected ? 'is-selected' : ''} ${count === 0 ? 'is-zero' : ''}" title="${title}">
+          <div class="decade-mark-bar-wrap">
+            <span class="decade-mark-bar" style="height:${barHeight}px;"></span>
+          </div>
+          <div class="decade-mark-label">${label}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
   function syncUiFromState() {
     const bounds = normalizeGeoBounds(portalFilters.geoBounds);
     const hint = document.getElementById('geoFilterHint');
@@ -602,12 +759,14 @@
       r.checked = (r.value === portalFilters.presenceMode);
     });
 
-    const r = getYearRangeFromState();
+    const selection = getDecadeRangeFromState();
     const $yearSlider = $('#yearRangeSlider');
     if (yearSliderInitialized && $yearSlider.length && $yearSlider.hasClass('ui-slider')) {
-      $yearSlider.slider('values', [r.minYear, r.maxYear]);
+      $yearSlider.slider('values', [selection.decadeStartIndex, selection.decadeEndIndex]);
     }
     updateYearRangeDisplay();
+    renderDecadeMarks();
+    updateDecadeSliderAccessibility();
 
     updateTraitModeUi();
     renderPhenophaseFilters();
@@ -616,8 +775,8 @@
   }
 
   function resetCustomFilters() {
-    portalFilters.minYear = MIN_YEAR;
-    portalFilters.maxYear = CURRENT_YEAR;
+    portalFilters.decadeStart = MIN_DECADE_START;
+    portalFilters.decadeEnd = MAX_DECADE_START;
     portalFilters.presenceMode = 'both';
     portalFilters.selectedPhenophases = [];
     portalFilters.geoBounds = null;
@@ -629,30 +788,40 @@
     const $yearSlider = $('#yearRangeSlider');
     if (!$yearSlider.length || !$.fn.slider || yearSliderInitialized) {
       updateYearRangeDisplay();
+      renderDecadeMarks();
       return;
     }
 
-    const r = getYearRangeFromState();
+    const selection = getDecadeRangeFromState();
     $yearSlider.slider({
       range: true,
-      min: MIN_YEAR,
-      max: CURRENT_YEAR,
-      values: [r.minYear, r.maxYear],
+      min: 0,
+      max: Math.max(0, DECADE_STARTS.length - 1),
+      step: 1,
+      values: [selection.decadeStartIndex, selection.decadeEndIndex],
+      create: function () {
+        updateDecadeSliderAccessibility();
+      },
       slide: function (_event, ui) {
-        portalFilters.minYear = ui.values[0];
-        portalFilters.maxYear = ui.values[1];
+        portalFilters.decadeStart = DECADE_STARTS[ui.values[0]];
+        portalFilters.decadeEnd = DECADE_STARTS[ui.values[1]];
         updateYearRangeDisplay();
+        renderDecadeMarks();
+        updateDecadeSliderAccessibility();
         updateQuerySummary();
       },
       stop: function (_event, ui) {
-        portalFilters.minYear = ui.values[0];
-        portalFilters.maxYear = ui.values[1];
+        portalFilters.decadeStart = DECADE_STARTS[ui.values[0]];
+        portalFilters.decadeEnd = DECADE_STARTS[ui.values[1]];
+        updateDecadeSliderAccessibility();
         runSearchForFilterChange();
       },
     });
 
     yearSliderInitialized = true;
     updateYearRangeDisplay();
+    renderDecadeMarks();
+    updateDecadeSliderAccessibility();
   }
 
   function bindCustomControls() {
@@ -663,6 +832,12 @@
     const $setGeoOnMap = $('#setGeoBoundsOnMap');
     const $traitModeSimple = $('#traitModeSimple');
     const $traitModeAll = $('#traitModeAll');
+
+    window.onMapBBoxSelected = function (bounds) {
+      portalFilters.geoBounds = normalizeGeoBounds(bounds);
+      syncUiFromState();
+      runSearchForFilterChange();
+    };
 
     window.onMapBBoxCleared = function () {
       if (!portalFilters.geoBounds) return;
@@ -771,12 +946,12 @@
       });
     });
 
-    if (!isFullYearRange()) {
-      const r = getYearRangeFromState();
+    if (!isFullDecadeRange()) {
+      const selection = getDecadeRangeFromState();
       chips.push({
         html: `
           <span class="selected-facet" data-custom="year-range">
-            <strong>Year:</strong> ${r.minYear} to ${r.maxYear}
+            <strong>Decade:</strong> ${decadeSelectionLabel(selection)}
             <span class="remove-facet" title="Remove" aria-label="Remove filter">x</span>
           </span>
         `,
@@ -839,8 +1014,8 @@
 
       if (customType) {
         if (customType === 'year-range' || customType === 'date-range') {
-          portalFilters.minYear = MIN_YEAR;
-          portalFilters.maxYear = CURRENT_YEAR;
+          portalFilters.decadeStart = MIN_DECADE_START;
+          portalFilters.decadeEnd = MAX_DECADE_START;
         } else if (customType === 'presence-mode') {
           portalFilters.presenceMode = presenceModeLocked ? 'present' : 'both';
           if (!presenceModeLocked) lastUnlockedPresenceMode = 'both';
@@ -907,22 +1082,38 @@
       }
     }
 
-    bucketsToRender.forEach((bucket) => {
-      const key = bucket.key;
+    if (field === 'dataSource') {
+      bucketsToRender.forEach((bucket) => {
+        const key = bucket.key;
+        const isSelected = selectedFacets[field] && selectedFacets[field].includes(key);
+        const countFormatted = (bucket.doc_count || 0).toLocaleString();
 
-      const isSelected = selectedFacets[field] && selectedFacets[field].includes(key);
-      const countFormatted = (bucket.doc_count || 0).toLocaleString();
+        $c.append(`
+          <label class="facet-option-card ${isSelected ? 'is-selected' : ''}" data-field="${field}" data-value="${key}">
+            <input type="checkbox" class="facet-option-check" data-field="${field}" data-value="${key}" ${isSelected ? 'checked' : ''}>
+            <span class="facet-option-text">${key}</span>
+            <span class="facet-option-count">(${countFormatted})</span>
+          </label>
+        `);
+      });
+    } else {
+      bucketsToRender.forEach((bucket) => {
+        const key = bucket.key;
 
-      $c.append(`
-        <div class="facet-link-container">
-          <a class="facet-link ${isSelected ? 'selected' : ''}" href="#" data-field="${field}" data-value="${key}">
-            <span class="text">${key}</span>
-            <span class="count">(${countFormatted})</span>
-            ${isSelected ? `<span class="remove-facet" data-field="${field}" data-value="${key}" title="Remove">x</span>` : ''}
-          </a>
-        </div>
-      `);
-    });
+        const isSelected = selectedFacets[field] && selectedFacets[field].includes(key);
+        const countFormatted = (bucket.doc_count || 0).toLocaleString();
+
+        $c.append(`
+          <div class="facet-link-container">
+            <a class="facet-link ${isSelected ? 'selected' : ''}" href="#" data-field="${field}" data-value="${key}">
+              <span class="text">${key}</span>
+              <span class="count">(${countFormatted})</span>
+              ${isSelected ? `<span class="remove-facet" data-field="${field}" data-value="${key}" title="Remove">x</span>` : ''}
+            </a>
+          </div>
+        `);
+      });
+    }
 
     if (limit && allBuckets.length > limit) {
       const toggleLabel = expanded ? 'see less' : 'see more';
@@ -934,6 +1125,13 @@
       const field = $(this).data('field');
       const value = $(this).data('value');
       if (!$(this).hasClass('selected')) addFacet(field, value);
+    });
+
+    $c.off('change', '.facet-option-check').on('change', '.facet-option-check', function () {
+      const targetField = $(this).data('field');
+      const targetValue = $(this).data('value');
+      if (this.checked) addFacet(targetField, targetValue);
+      else removeFacet(targetField, targetValue);
     });
 
     $c.off('click', '.facet-see-more').on('click', '.facet-see-more', function (e) {
@@ -976,9 +1174,8 @@
     renderFacetLinks(traitAgg, '#allTraitsFilters', 'mappedTraits');
 
     updateTraitCountLookup(aggregations);
-    renderPhenophaseFilters();
-    updateTraitModeUi();
-    syncPresenceModeFromSelectedSources();
+    updateDecadeCountLookup(aggregations);
+    syncUiFromState();
 
     renderSelectedFacets();
     updateQuerySummary();

@@ -45,20 +45,6 @@
 
         <div class="facet-title-row">
           <div class="facet-title-with-info">
-            <div class="facet-title">Year Range</div>
-            <button type="button" class="filter-info-btn" data-info-target="helpDateRange" aria-controls="helpDateRange" aria-expanded="false" aria-label="Date range filter help">
-              <i class="fas fa-circle-info" aria-hidden="true"></i>
-            </button>
-          </div>
-          <div id="helpDateRange" class="filter-help-popover" role="tooltip" hidden>Use the slider to filter observations by year.</div>
-        </div>
-        <div class="date-range-controls">
-          <div id="yearRangeSlider"></div>
-          <div id="yearRangeDisplay" class="filter-hint"></div>
-        </div>
-
-        <div class="facet-title-row">
-          <div class="facet-title-with-info">
             <div class="facet-title">Presence</div>
             <button type="button" class="filter-info-btn" data-info-target="helpPresence" aria-controls="helpPresence" aria-expanded="false" aria-label="Presence filter help">
               <i class="fas fa-circle-info" aria-hidden="true"></i>
@@ -89,6 +75,21 @@
         <div id="traitModeWarning" class="text-warning filter-hint" style="display:none;"></div>
         <div id="phenophaseFilters"></div>
         <div id="allTraitsFilters" style="display:none;"></div>
+
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
+            <div class="facet-title">Decade Range</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpDateRange" aria-controls="helpDateRange" aria-expanded="false" aria-label="Decade range filter help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpDateRange" class="filter-help-popover" role="tooltip" hidden>Explore a single decade or compare multiple decades. Drag both handles to the same decade for a single-decade view.</div>
+        </div>
+        <div class="date-range-controls">
+          <div id="yearRangeDisplay" class="filter-hint"></div>
+          <div id="yearRangeSlider"></div>
+          <div id="yearRangeMarks" class="decade-slider-marks" aria-hidden="true"></div>
+        </div>
 
         <div class="facet-title-row">
           <div class="facet-title-with-info">
@@ -148,8 +149,14 @@
 
         <!-- Container for map view -->
         <div id="mapContainer" style="display: none;">
-          <div id="mapDrawHelp" class="map-draw-help" style="display:none;"></div>
-          <div id="mapLoadStatus" class="map-load-status" style="display:none;"></div>
+          <div id="mapDrawHelp" class="map-draw-help" style="display:none;">
+            <button id="mapDrawHelpClose" class="map-message-close" type="button" aria-label="Close map help">X</button>
+            <div id="mapDrawHelpText" class="map-message-text"></div>
+          </div>
+          <div id="mapLoadStatus" class="map-load-status" style="display:none;">
+            <button id="mapLoadStatusClose" class="map-message-close" type="button" aria-label="Close map status">X</button>
+            <div id="mapLoadStatusText" class="map-message-text"></div>
+          </div>
           <div id="map"></div>
         </div>
 
