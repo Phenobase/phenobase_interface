@@ -6,10 +6,75 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(255, 255, 255, 0.8);
-  z-index: 10000;
+  background: rgba(248, 250, 252, 0.72);
+  backdrop-filter: blur(2px);
+  z-index: 10020;
   justify-content: center;
   align-items: center;
+}
+
+.loader-card {
+  width: min(420px, calc(100vw - 32px));
+  padding: 22px 24px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  text-align: center;
+}
+
+.loader-spinner {
+  margin: 0 auto 14px;
+  border: 4px solid #dbe7dc;
+  border-top: 4px solid #2f5d3a;
+  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  animation: spin 0.9s linear infinite;
+}
+
+.loader-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.loader-stage {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.loader-progress-track {
+  margin-top: 14px;
+  height: 10px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.loader-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3d7a4a 0%, #6ea379 100%);
+  transition: width 0.2s ease;
+}
+
+.loader-meta {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.loader-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #64748b;
 }
 
 .spinner {
@@ -305,8 +370,24 @@ html, body {
 .toggle-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
   border: 1px solid #ddd;
   gap: 10px;
+}
+
+.toggle-bar .btn-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.toggle-bar .btn-group .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Custom button styles for a softer, more muted appearance */
@@ -330,6 +411,18 @@ html, body {
 
 .btn-custom-map:hover {
   background-color: #5a6268; /* Slightly darker on hover */
+}
+
+.btn.btn-custom-table.is-active,
+.btn.btn-custom-map.is-active,
+.btn.btn-custom-table.is-active:hover,
+.btn.btn-custom-map.is-active:hover,
+.btn.btn-custom-table.is-active:focus,
+.btn.btn-custom-map.is-active:focus {
+  background-color: #2f5d3a !important;
+  border-color: #2f5d3a !important;
+  color: #fff !important;
+  box-shadow: inset 0 -2px 0 rgba(15, 23, 42, 0.22);
 }
 
 .toggle-bar #resultsHeading {
@@ -440,6 +533,70 @@ html, body {
 
 .trait-decade-canvas-wrap {
   height: 260px;
+}
+
+.stats-chart-card {
+  border: 1px solid #dbe3ec;
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px 14px 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  margin-bottom: 24px;
+}
+
+.stats-chart-wrap {
+  height: 220px;
+}
+
+.stats-chart-wrap-tall {
+  height: 360px;
+}
+
+.stats-chart-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stats-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+  padding-top: 2px;
+  background: #fff;
+}
+
+.stats-status-banner {
+  margin: 0 auto 16px;
+  max-width: 560px;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #111;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.stats-status-banner.is-success {
+  border-color: #86efac;
+  background: rgba(240, 253, 244, 0.98);
+}
+
+.stats-status-banner.is-error {
+  border-color: #fca5a5;
+  background: rgba(254, 242, 242, 0.98);
+  color: #7f1d1d;
+}
+
+.stats-status-text {
+  display: block;
 }
 
 /* Basic table styling */
@@ -753,11 +910,14 @@ html, body { color: #000 !important; background: #fff; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 8px;
 }
 
 #querySummary {
   font-size: 12px;
+  min-width: 0;
 }
 
 /* Facet links + the little "X" */

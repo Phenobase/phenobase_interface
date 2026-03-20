@@ -84,6 +84,7 @@
 
   const availableTraitCountsLC = new Map();
   const decadeCountsByStart = new Map();
+  let availableDataSources = [];
   const FACET_PREVIEW_LIMITS = { family: 5, genus: 5 };
   const facetExpandedState = { family: false, genus: false };
   let initializedCustomControls = false;
@@ -124,8 +125,8 @@
     if (typeof window.fetchResults === 'function') {
       window.fetchResults();
     }
-    if ($('#statsContainer').is(':visible') && typeof window.fetchStatsData === 'function') {
-      window.fetchStatsData();
+    if (typeof window.markStatsNeedsRefresh === 'function') {
+      window.markStatsNeedsRefresh();
     }
   }
 
@@ -171,13 +172,63 @@
     return r.decadeStart <= MIN_DECADE_START && r.decadeEnd >= MAX_DECADE_START;
   }
 
-  function syncDecadeRangeToUrl() {
+  function setArrayParams(params, key, values) {
+    params.delete(key);
+    toArray(values)
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .forEach((value) => params.append(key, value));
+  }
+
+  function fullEarthBounds() {
+    return {
+      minLat: -90,
+      maxLat: 90,
+      minLon: -180,
+      maxLon: 180,
+    };
+  }
+
+  function isFullEarthBounds(bounds) {
+    const normalized = normalizeGeoBounds(bounds);
+    if (!normalized) return false;
+    return normalized.minLat <= -90
+      && normalized.maxLat >= 90
+      && normalized.minLon <= -180
+      && normalized.maxLon >= 180;
+  }
+
+  function syncPortalStateToUrl() {
     if (!(window.history && window.history.replaceState)) return;
 
     const selection = getDecadeRangeFromState();
     const params = new URLSearchParams(window.location.search);
+    const bounds = normalizeGeoBounds(portalFilters.geoBounds) || normalizeGeoBounds(fullEarthBounds());
+    const selectedFacetsState = window.selectedFacets || {};
+    const scientificName = String(window.scientificNameSearchText || '').trim();
+    const effectiveDataSources = toArray(selectedFacetsState.dataSource).length
+      ? toArray(selectedFacetsState.dataSource)
+      : availableDataSources;
+
+    if (scientificName) params.set('scientificName', scientificName);
+    else params.delete('scientificName');
+
     params.set('decadeStart', String(selection.decadeStart));
     params.set('decadeEnd', String(selection.decadeEnd));
+
+    params.set('presenceMode', String(portalFilters.presenceMode || 'both'));
+
+    if ((portalFilters.traitMode || 'simple') !== 'simple') params.set('traitMode', String(portalFilters.traitMode || 'simple'));
+    else params.delete('traitMode');
+
+    setArrayParams(params, 'dataSource', effectiveDataSources);
+    setArrayParams(params, 'mappedTrait', selectedFacetsState.mappedTraits);
+    setArrayParams(params, 'phenophase', portalFilters.selectedPhenophases);
+
+    params.set('minLat', bounds.minLatText);
+    params.set('maxLat', bounds.maxLatText);
+    params.set('minLon', bounds.minLonText);
+    params.set('maxLon', bounds.maxLonText);
 
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
@@ -186,10 +237,68 @@
 
   function initializePortalFiltersFromUrl() {
     const params = new URLSearchParams(window.location.search);
-    if (!params.has('decadeStart') && !params.has('decadeEnd')) return;
+    const selectedFromUrl = {};
+    const scientificName = String(params.get('scientificName') || '').trim();
+    const dataSources = params.getAll('dataSource').filter(Boolean);
+    const mappedTraits = params.getAll('mappedTrait').filter(Boolean);
+    const phenophases = params.getAll('phenophase').filter(Boolean);
+    const presenceMode = String(params.get('presenceMode') || '').toLowerCase();
+    const traitMode = String(params.get('traitMode') || '').toLowerCase();
 
-    portalFilters.decadeStart = clampDecadeStart(params.get('decadeStart'), MIN_DECADE_START);
-    portalFilters.decadeEnd = clampDecadeStart(params.get('decadeEnd'), MAX_DECADE_START);
+    if (dataSources.length) selectedFromUrl.dataSource = dataSources;
+    if (mappedTraits.length) selectedFromUrl.mappedTraits = mappedTraits;
+
+    window.selectedFacets = selectedFromUrl;
+    selectedFacets = window.selectedFacets;
+
+    if (scientificName) {
+      const builtScientificFilter = window.buildScientificSearchFilter
+        ? window.buildScientificSearchFilter(scientificName)
+        : null;
+      window.scientificNameSearchText = scientificName;
+      window.scientificNameFilter = builtScientificFilter;
+      if (typeof scientificNameFilter !== 'undefined') scientificNameFilter = builtScientificFilter;
+      if ($('#scientificNameSearch').length) $('#scientificNameSearch').val(scientificName);
+    }
+
+    if (presenceMode === 'present' || presenceMode === 'absent' || presenceMode === 'both') {
+      portalFilters.presenceMode = presenceMode;
+    }
+
+    if (traitMode === 'all' || traitMode === 'simple') {
+      portalFilters.traitMode = traitMode;
+    }
+
+    function readOptionalDecadeParam(key) {
+      if (!params.has(key)) return null;
+      const raw = String(params.get(key) || '').trim();
+      if (!raw) return null;
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value === 0) return null;
+      return clampDecadeStart(value, key === 'decadeEnd' ? MAX_DECADE_START : MIN_DECADE_START);
+    }
+
+    portalFilters.selectedPhenophases = phenophases;
+    const urlDecadeStart = readOptionalDecadeParam('decadeStart');
+    const urlDecadeEnd = readOptionalDecadeParam('decadeEnd');
+    if (urlDecadeStart != null) portalFilters.decadeStart = urlDecadeStart;
+    if (urlDecadeEnd != null) portalFilters.decadeEnd = urlDecadeEnd;
+
+    if (params.has('minLat') && params.has('maxLat') && params.has('minLon') && params.has('maxLon')) {
+      const rawBounds = {
+        minLat: String(params.get('minLat') || '').trim(),
+        maxLat: String(params.get('maxLat') || '').trim(),
+        minLon: String(params.get('minLon') || '').trim(),
+        maxLon: String(params.get('maxLon') || '').trim(),
+      };
+      const numericBounds = [rawBounds.minLat, rawBounds.maxLat, rawBounds.minLon, rawBounds.maxLon].map(Number);
+      const isLegacyZeroBounds = numericBounds.every((value) => Number.isFinite(value) && value === 0);
+
+      if (!isLegacyZeroBounds) {
+        const bounds = normalizeGeoBounds(rawBounds);
+        portalFilters.geoBounds = isFullEarthBounds(bounds) ? null : bounds;
+      }
+    }
     getDecadeRangeFromState();
   }
 
@@ -556,7 +665,7 @@
       window.updateDownloadLink();
     }
 
-    syncDecadeRangeToUrl();
+    syncPortalStateToUrl();
     updateQuerySummary();
   }
 
@@ -1159,11 +1268,35 @@
     });
   }
 
+  function updateAvailableDataSources(aggregations) {
+    availableDataSources = (aggregations?.datasource_0?.buckets || [])
+      .map((bucket) => String(bucket?.key || '').trim())
+      .filter(Boolean);
+  }
+
+  function normalizeSelectedDataSourcesAgainstAvailable() {
+    selectedFacets = window.selectedFacets || {};
+    const selectedSources = toArray(selectedFacets.dataSource)
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    if (!selectedSources.length || !availableDataSources.length) return false;
+
+    const selectedSet = new Set(selectedSources);
+    if (selectedSet.size !== availableDataSources.length) return false;
+    if (!availableDataSources.every((source) => selectedSet.has(source))) return false;
+
+    delete selectedFacets.dataSource;
+    window.selectedFacets = selectedFacets;
+    return true;
+  }
+
   // -----------------------
   // Main entry from fetchResults success
   // -----------------------
   function renderFacets(aggregations) {
     selectedFacets = window.selectedFacets || {};
+    updateAvailableDataSources(aggregations);
+    const normalizedAllSources = normalizeSelectedDataSourcesAgainstAvailable();
 
     $('#dataSourceFacets').empty();
     $('#allTraitsFilters').empty();
@@ -1179,6 +1312,7 @@
 
     renderSelectedFacets();
     updateQuerySummary();
+    if (normalizedAllSources) syncPortalStateToUrl();
   }
 
   window.renderFacets = renderFacets;

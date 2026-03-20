@@ -19,7 +19,7 @@ function isHiddenTrait(v) { return String(v || '').trim().toLowerCase() === HIDD
 // ES request payload
 var requestData = {
   aggs: {
-    datasource_0: { terms: { field: "dataSource", size: 10 } },
+    datasource_0: { terms: { field: "dataSource", size: 100 } },
     mappedTraits_1: { terms: { field: "mappedTraits", size: 2000 } },
     family_2: { terms: { field: "family", size: 50 } },
     genus_3: { terms: { field: "genus", size: 50 } },
@@ -187,8 +187,63 @@ function convertJsonToLucene(jsonQuery) {
   const lucene = clauseToLucene(jsonQuery);
   return lucene || '*:*';
 }
-function showLoader(){ $("#loader").css("display","flex"); $(".facet-link").css("pointer-events","none"); }
-function hideLoader(){ $("#loader").css("display","none"); $(".facet-link").css("pointer-events","auto"); }
+let loaderProgressTimer = null;
+let loaderStartedAt = 0;
+let loaderStageBaseProgress = 0;
+let loaderHideTimer = null;
+
+function updateLoaderProgress(stageText, progressPercent) {
+  const safePercent = Math.max(0, Math.min(100, Math.round(progressPercent || 0)));
+  if ($('#loaderStage').length) $('#loaderStage').text(stageText || 'Loading records...');
+  if ($('#loaderProgressBar').length) $('#loaderProgressBar').css('width', `${safePercent}%`);
+  if ($('#loaderPercent').length) $('#loaderPercent').text(`${safePercent}%`);
+}
+
+function refreshLoaderElapsed() {
+  if (!loaderStartedAt) return;
+  const elapsedMs = Date.now() - loaderStartedAt;
+  const driftPercent = Math.min(92, loaderStageBaseProgress + Math.floor(elapsedMs / 220));
+  if ($('#loaderElapsed').length) $('#loaderElapsed').text(`Elapsed: ${(elapsedMs / 1000).toFixed(1)}s`);
+  updateLoaderProgress($('#loaderStage').text() || 'Loading records...', driftPercent);
+}
+
+function showLoader(stageText = 'Submitting query...', baseProgress = 12) {
+  loaderStartedAt = Date.now();
+  loaderStageBaseProgress = baseProgress;
+  if (loaderProgressTimer) {
+    clearInterval(loaderProgressTimer);
+    loaderProgressTimer = null;
+  }
+  if (loaderHideTimer) {
+    clearTimeout(loaderHideTimer);
+    loaderHideTimer = null;
+  }
+  $("#loader").css("display", "flex").attr("aria-hidden", "false");
+  $(".facet-link").css("pointer-events", "none");
+  updateLoaderProgress(stageText, loaderStageBaseProgress);
+  if ($('#loaderElapsed').length) $('#loaderElapsed').text('Elapsed: 0.0s');
+  loaderProgressTimer = window.setInterval(refreshLoaderElapsed, 120);
+}
+
+function setLoaderStage(stageText, baseProgress) {
+  loaderStageBaseProgress = Math.max(loaderStageBaseProgress, Math.round(baseProgress || 0));
+  updateLoaderProgress(stageText, loaderStageBaseProgress);
+}
+
+function hideLoader() {
+  if (loaderProgressTimer) {
+    clearInterval(loaderProgressTimer);
+    loaderProgressTimer = null;
+  }
+  if (loaderHideTimer) {
+    clearTimeout(loaderHideTimer);
+    loaderHideTimer = null;
+  }
+  loaderStartedAt = 0;
+  loaderStageBaseProgress = 0;
+  $("#loader").css("display", "none").attr("aria-hidden", "true");
+  $(".facet-link").css("pointer-events", "auto");
+}
 function updateResultsHeading(showingResults, totalResults) {
   document.getElementById('resultsHeading').textContent =
     `Showing ${showingResults} of ${totalResults.toLocaleString()} total possible results`;
@@ -204,6 +259,25 @@ function updateDownloadLink() {
   const luceneQuery = convertJsonToLucene(requestData.query);
   downloadLink = `${queryStringRootURL}${encodeURIComponent(luceneQuery)}&limit=100000`;
   $("#downloadButton").attr("href", downloadLink).attr("download", "phenobase_data.json").prop("disabled", false);
+}
+function setActiveMainTab(tabName) {
+  window.currentMainTab = tabName;
+
+  const isTable = tabName === 'table';
+  const isMap = tabName === 'map';
+  const isStats = tabName === 'stats';
+
+  $("#tableContainer").toggle(isTable);
+  $("#mapContainer").toggle(isMap);
+  $("#statsContainer").toggle(isStats);
+
+  $("#showTable").toggleClass("is-active", isTable).attr("aria-pressed", isTable ? "true" : "false");
+  $("#showMap").toggleClass("is-active", isMap).attr("aria-pressed", isMap ? "true" : "false");
+  $("#showStats").toggleClass("is-active", isStats).attr("aria-pressed", isStats ? "true" : "false");
+
+  if (typeof window.syncStatsStatusVisibility === 'function') {
+    window.syncStatsStatusVisibility();
+  }
 }
 function buildScientificSearchFilter(searchTerm) {
   return {
@@ -228,14 +302,14 @@ function handleScientificNameSearch() {
     updateQueryWithSelectedFacets();
   }
   fetchResults();
-  if ($('#statsContainer').is(':visible') && typeof window.fetchStatsData === 'function') {
-    window.fetchStatsData();
+  if (typeof window.markStatsNeedsRefresh === 'function') {
+    window.markStatsNeedsRefresh();
   }
 }
 
 // Fetch & render
 function fetchResults() {
-  showLoader();
+  showLoader('Submitting query...', 14);
 
   // NEW: adjust page size to fill the screen when the table is visible
   if ($('#tableContainer').is(':visible')) {
@@ -246,9 +320,12 @@ function fetchResults() {
   const apiWithPagination = `${apiUrl.split('?')[0]}?size=${pageSize}&from=${offset}`;
   $.ajax({
     url: apiWithPagination, method: "POST", contentType: "application/json",
+    beforeSend: function () {
+      setLoaderStage('Waiting for records...', 26);
+    },
     data: JSON.stringify(requestData), dataType: "json",
     success: function (response) {
-      hideLoader();
+      setLoaderStage('Rendering results...', 96);
       if (response?.hits?.hits) {
         const results = response.hits.hits;
         const totalResults = calculateTotalFromFacets(response.aggregations);
@@ -263,7 +340,13 @@ function fetchResults() {
           window.markMapNeedsRender();
         }
         updateResultsHeading(`${startResult} - ${endResult}`, totalResults);
-      } else { console.error("Unexpected response", response); alert("Unexpected response structure."); }
+        setLoaderStage('Results ready.', 100);
+        loaderHideTimer = window.setTimeout(hideLoader, 140);
+      } else {
+        hideLoader();
+        console.error("Unexpected response", response);
+        alert("Unexpected response structure.");
+      }
     },
     error: function (error) { hideLoader(); console.error("Error fetching data:", error); }
   });
@@ -375,6 +458,7 @@ $(document).ready(function () {
   if (typeof window.updateQueryWithSelectedFacets === 'function') {
     window.updateQueryWithSelectedFacets();
   }
+  setActiveMainTab('table');
 
   // Initial: if table is visible on load, compute dynamic size first
   if ($('#tableContainer').is(':visible')) {
@@ -394,12 +478,12 @@ $(document).ready(function () {
     if (typeof window.cancelMapDataLoading === 'function') {
       window.cancelMapDataLoading();
     }
-    $("#tableContainer").show(); $("#mapContainer").hide(); $("#statsContainer").hide();
+    setActiveMainTab('table');
     computeDynamicPageSize();
     fetchResults();
   });
   $("#showMap").click(function () {
-    $("#mapContainer").show(); $("#tableContainer").hide(); $("#statsContainer").hide();
+    setActiveMainTab('map');
     setTimeout(() => {
       map.invalidateSize();
       if (typeof window.markMapNeedsRender === 'function') {
@@ -414,8 +498,10 @@ $(document).ready(function () {
     if (typeof window.cancelMapDataLoading === 'function') {
       window.cancelMapDataLoading();
     }
-    $("#statsContainer").show(); $("#mapContainer").hide(); $("#tableContainer").hide();
-    fetchStatsData();
+    setActiveMainTab('stats');
+    if (typeof window.fetchStatsData === 'function') {
+      window.fetchStatsData();
+    }
   });
 
   // Recompute on window resize (debounced) when table visible

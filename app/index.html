@@ -127,9 +127,10 @@
 
         <button id="downloadButton" class="btn btn-primary">Download Data</button>
 
-        <p class="text-muted"> 
-          All records are retrieved from the <a href='https://github.com/biocodellc/biscicol-server/blob/master/docs/phenobase_query.md' target=_blank>Phenobase API</a>.  
-          Visit the <a href='https://phenobase.org/' target=_blank>Phenobase website</a> for more information.</p>
+        <p class="text-muted">
+          Visit the <a href="https://phenobase.org/" target="_blank">Phenobase website</a> for more information.
+          View our <a href="https://github.com/phenobase/phenobase_interface/" target="_blank">GitHub repository</a> for more information about this UI and the backend API.
+        </p>
       </div>
 
       <div class="col-xs-9 col-xs-offset-3 main">
@@ -162,7 +163,14 @@
 
         <!-- Container for stats view -->
         <div id="statsContainer">
+          <div class="stats-toolbar">
+            <button id="refreshStatsButton" class="btn btn-default btn-sm" type="button">Refresh Stats</button>
+          </div>
+          <div id="statsStatus" class="stats-status-banner" style="display:none;">
+            <div id="statsStatusText" class="stats-status-text"></div>
+          </div>
           <div id="datasourceTable"></div>
+          <div id="decadeTable"></div>
           <div id="mappedTraitsTable"></div>
           <div id="familyTable"></div>
           <div id="genusTable"></div>
@@ -193,8 +201,21 @@
   </div>
 
   <!-- Spinner/Loader -->
-  <div id="loader" class="loader-overlay">
-    <div id="spinner" style="display: none;">Loading...</div>
+  <div id="loader" class="loader-overlay" aria-hidden="true">
+    <div class="loader-card" role="status" aria-live="polite" aria-atomic="true">
+      <div class="loader-spinner" aria-hidden="true"></div>
+      <div class="loader-title">Loading records</div>
+      <div id="loaderStage" class="loader-stage">Preparing query...</div>
+      <div class="loader-progress-track" aria-hidden="true">
+        <div id="loaderProgressBar" class="loader-progress-bar"></div>
+      </div>
+      <div class="loader-meta">
+        <span id="loaderPercent">0%</span>
+        <span id="loaderElapsed">Elapsed: 0.0s</span>
+      </div>
+      <div class="loader-note">Broad searches can take longer.</div>
+      <div id="spinner" style="display: none;" aria-hidden="true"></div>
+    </div>
   </div>
 
   <!-- Human Verification Dialog -->
