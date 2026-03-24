@@ -1097,6 +1097,7 @@
     const $traitModeSimple = $('#traitModeSimple');
     const $traitModeAll = $('#traitModeAll');
     const $applyFilters = $('#applyFiltersButton');
+    const $clearAllFilters = $('#clearAllFiltersButton');
     const $resetDraft = $('#resetDraftFiltersButton');
 
     window.onMapBBoxSelected = function (bounds) {
@@ -1196,6 +1197,19 @@
       updateQuerySummary();
     });
 
+    $clearAllFilters.on('click', function () {
+      window.selectedFacets = {};
+      selectedFacets = window.selectedFacets;
+
+      if (typeof window.scientificNameFilter !== 'undefined') window.scientificNameFilter = null;
+      if (typeof window.scientificNameSearchText !== 'undefined') window.scientificNameSearchText = '';
+      if ($('#scientificNameSearch').length) $('#scientificNameSearch').val('');
+
+      resetCustomFilters();
+      syncUiFromState();
+      markFiltersPending();
+    });
+
     initializedCustomControls = true;
     syncUiFromState();
     refreshFilterApplyUi();
@@ -1282,9 +1296,6 @@
     chips.forEach((c) => $chips.append(c.html));
     $wrap.append($chips);
 
-    const $clear = $('<button class="btn btn-default" id="clearAllFacetsBtn" style="margin-top:8px;">Clear all</button>');
-    $wrap.append($clear);
-
     $wrap.off('click', '.remove-facet').on('click', '.remove-facet', function (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -1316,20 +1327,6 @@
       const field = $p.data('field');
       const value = $p.data('value');
       removeFacet(field, value);
-    });
-
-    $wrap.off('click', '#clearAllFacetsBtn').on('click', '#clearAllFacetsBtn', function () {
-      window.selectedFacets = {};
-      selectedFacets = window.selectedFacets;
-
-      if (typeof window.scientificNameFilter !== 'undefined') window.scientificNameFilter = null;
-      if (typeof window.scientificNameSearchText !== 'undefined') window.scientificNameSearchText = '';
-      if ($('#scientificNameSearch').length) $('#scientificNameSearch').val('');
-
-      resetCustomFilters();
-      syncUiFromState();
-
-      markFiltersPending();
     });
 
     updateQuerySummary();
