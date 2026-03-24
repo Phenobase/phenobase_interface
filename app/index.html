@@ -102,7 +102,6 @@
         </div>
         <div class="search-container">
           <input type="text" id="scientificNameSearch" placeholder="Family, genus, or scientific name">
-          <button id="searchButton">Go</button>
         </div>
 
         <div class="facet-title-row">
@@ -120,6 +119,14 @@
             <button id="clearGeoBounds" class="btn btn-default btn-sm" type="button">Clear</button>
           </div>
           <div id="geoFilterHint" class="text-muted filter-hint"></div>
+        </div>
+
+        <div class="filter-apply-bar">
+          <div id="filterPendingMessage" class="filter-pending-message">Filters are up to date.</div>
+          <div class="filter-apply-actions">
+            <button id="applyFiltersButton" class="btn btn-primary btn-sm" type="button" disabled>Apply Filters</button>
+            <button id="resetDraftFiltersButton" class="btn btn-default btn-sm" type="button" disabled>Reset Draft</button>
+          </div>
         </div>
 
         <!-- Container for displaying selected facets -->
@@ -174,6 +181,7 @@
           <div id="mappedTraitsTable"></div>
           <div id="familyTable"></div>
           <div id="genusTable"></div>
+          <div id="dataReleaseHistorySection"></div>
         </div>
 
         <!-- Container for table view -->

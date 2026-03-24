@@ -212,10 +212,13 @@ The map view is intentionally manual-rendered. Changing filters updates the unde
 
 The Stats tab uses a separate stats-only request based on the current shared query.
 
+For the unfiltered landing view, the app can also load a pre-rendered snapshot from `app/global-stats-snapshot.json`. When that file has `"ready": true`, the UI uses it instead of issuing a live global-summary request on first load.
+
 #### Current stats sections
 
 - `Datasource Distribution`
-- `Mapped Traits: Day of Year by Decade`
+- `Phenophase Presence Summary` for the unfiltered global landing view
+- `Mapped Traits: Day of Year by Decade` for filtered stats views
 - `Family Distribution`
 - `Genus Distribution`
 
@@ -244,6 +247,101 @@ Stats refresh behavior:
 - Opening `Stats` fetches fresh aggregations immediately
 - While `Stats` is visible, changing sidebar filters refreshes the stats request
 - Scientific-name search also refreshes Stats when the Stats tab is active
+
+#### Pre-render landing page stats
+
+The recommended production landing experience is to prebuild the unfiltered global stats summary into:
+
+- `app/global-stats-snapshot.json`
+
+The frontend only uses that file when:
+
+- `"ready": true`
+- the file includes the expected top-level aggregations
+- the current view is the unfiltered global stats page
+
+If the file is missing, incomplete, or still marked `"ready": false`, the UI falls back to a live global-summary request.
+
+Example workflow:
+
+1. Generate the snapshot with the helper script:
+
+```bash
+./scripts/build-global-stats-snapshot.sh
+```
+
+Optional environment overrides:
+
+```bash
+MAX_DECADE=2030 ./scripts/build-global-stats-snapshot.sh
+OUTPUT_PATH=app/global-stats-snapshot.json ./scripts/build-global-stats-snapshot.sh
+API_URL="https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=0&from=0" ./scripts/build-global-stats-snapshot.sh
+```
+
+2. Commit and deploy the updated `app/global-stats-snapshot.json`.
+
+Reference: raw request shape used by the helper script:
+
+```bash
+cat > /tmp/phenobase-global-stats-request.json <<'JSON'
+{
+  "size": 0,
+  "track_total_hits": false,
+  "query": { "match_all": {} },
+  "aggs": {
+    "datasource_0": { "terms": { "field": "dataSource", "size": 10 } },
+    "decadeDistribution_1": {
+      "histogram": {
+        "field": "decadeStart",
+        "interval": 10,
+        "min_doc_count": 0,
+        "extended_bounds": { "min": 1800, "max": 2020 }
+      }
+    },
+    "family_2": { "terms": { "field": "family", "size": 50 } },
+    "genus_3": { "terms": { "field": "genus", "size": 50 } },
+    "phenophasePresenceSummary_4": {
+      "filters": {
+        "filters": {
+          "unfolded_true_leaf_present": { "term": { "mappedTraits": "unfolded true leaf present" } },
+          "unfolded_true_leaf_absent": { "term": { "mappedTraits": "unfolded true leaf absent" } },
+          "breaking_vegetative_bud_present": { "term": { "mappedTraits": "breaking vegetative bud present" } },
+          "breaking_vegetative_bud_absent": { "term": { "mappedTraits": "breaking vegetative bud absent" } },
+          "senescing_true_leaf_present": { "term": { "mappedTraits": "senescing true leaf present" } },
+          "senescing_true_leaf_absent": { "term": { "mappedTraits": "senescing true leaf absent" } },
+          "flower_present": { "term": { "mappedTraits": "flower present" } },
+          "flower_absent": { "term": { "mappedTraits": "flower absent" } },
+          "open_flower_present": { "term": { "mappedTraits": "open flower present" } },
+          "open_flower_absent": { "term": { "mappedTraits": "open flower absent" } },
+          "simple_fruit_or_compound_fruit_present": { "term": { "mappedTraits": "simple fruit or compound fruit present" } },
+          "simple_fruit_or_compound_fruit_absent": { "term": { "mappedTraits": "simple fruit or compound fruit absent" } },
+          "ripe_fruit_present": { "term": { "mappedTraits": "ripe fruit present" } },
+          "ripe_fruit_absent": { "term": { "mappedTraits": "ripe fruit absent" } }
+        }
+      }
+    }
+  }
+}
+JSON
+```
+
+Equivalent manual generation command:
+
+```bash
+curl -s \
+  -X POST \
+  "https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=0&from=0" \
+  -H "Content-Type: application/json" \
+  --data @/tmp/phenobase-global-stats-request.json \
+  | python3 -c 'import json,sys,datetime; response=json.load(sys.stdin); payload={"ready": True, "generatedAt": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z", "summaryOnly": True, "traitNote": "Showing a lighter high-level phenophase summary for the unfiltered global view.", "aggregations": response.get("aggregations", {})}; json.dump(payload, sys.stdout, indent=2); sys.stdout.write("\n")' \
+  > app/global-stats-snapshot.json
+```
+
+Notes:
+
+- Update the histogram `extended_bounds.max` value if your indexed maximum decade changes.
+- Keep the snapshot in source control if you want static hosting to serve it directly.
+- `Refresh Stats` in the UI still requests live data; the pre-rendered file only affects the default unfiltered landing view.
 
 ## Backend API Calls
 
@@ -274,7 +372,8 @@ The frontend talks to the Phenobase proxy endpoint and sends Elasticsearch-style
   - `size: 0`
   - `track_total_hits: false`
   - uses the current shared query
-  - requests custom stats aggregations for datasource, family, genus, and mapped-trait decade distributions
+  - requests lighter global-summary aggregations for the unfiltered landing view
+  - requests mapped-trait decade distributions for filtered stats views
 
 ### 3) Map points
 
