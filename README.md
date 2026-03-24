@@ -343,6 +343,42 @@ Notes:
 - Keep the snapshot in source control if you want static hosting to serve it directly.
 - `Refresh Stats` in the UI still requests live data; the pre-rendered file only affects the default unfiltered landing view.
 
+#### After releasing new data
+
+After inserting or updating records in the datastore, update these frontend-facing artifacts before deploying the UI:
+
+1. Update `app/data-release-history.json`.
+   Add a new entry at the top of `entries` with the new dataset version, publish date, record count, methodology, and change summary.
+
+2. Rebuild `app/global-stats-snapshot.json`.
+   Run:
+
+   ```bash
+   ./scripts/build-global-stats-snapshot.sh
+   ```
+
+3. Adjust the decade range used by the snapshot build if needed.
+   If the new load introduces a later indexed decade, regenerate with a higher bound, for example:
+
+   ```bash
+   MAX_DECADE=2030 ./scripts/build-global-stats-snapshot.sh
+   ```
+
+4. Validate the JSON files before commit.
+   Example checks:
+
+   ```bash
+   node -e "JSON.parse(require('fs').readFileSync('app/data-release-history.json','utf8')); console.log('data-release-history.json ok')"
+   node -e "JSON.parse(require('fs').readFileSync('app/global-stats-snapshot.json','utf8')); console.log('global-stats-snapshot.json ok')"
+   ```
+
+5. Commit and deploy the updated frontend files.
+   At minimum this usually means:
+   - `app/data-release-history.json`
+   - `app/global-stats-snapshot.json`
+
+If you skip these steps, the live query API may have the new records, but the default landing-page summary and release-history section can lag behind the actual datastore contents.
+
 ## Backend API Calls
 
 The frontend talks to the Phenobase proxy endpoint and sends Elasticsearch-style JSON.
