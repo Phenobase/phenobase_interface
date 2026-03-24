@@ -244,9 +244,20 @@ function hideLoader() {
   $("#loader").css("display", "none").attr("aria-hidden", "true");
   $(".facet-link").css("pointer-events", "auto");
 }
+function setResultsHeadingText(text) {
+  const el = document.getElementById('resultsHeading');
+  if (!el) return;
+  el.textContent = text || 'Showing Results';
+}
+function getCurrentQuerySignature() {
+  try {
+    return JSON.stringify(requestData.query || { match_all: {} });
+  } catch (_error) {
+    return String(Date.now());
+  }
+}
 function updateResultsHeading(showingResults, totalResults) {
-  document.getElementById('resultsHeading').textContent =
-    `Showing ${showingResults} of ${totalResults.toLocaleString()} total possible results`;
+  setResultsHeadingText(`Showing ${showingResults} of ${totalResults.toLocaleString()} total possible results`);
 }
 function calculateTotalFromFacets(aggregations) {
   let total = 0;
@@ -275,6 +286,14 @@ function setActiveMainTab(tabName) {
   $("#showMap").toggleClass("is-active", isMap).attr("aria-pressed", isMap ? "true" : "false");
   $("#showStats").toggleClass("is-active", isStats).attr("aria-pressed", isStats ? "true" : "false");
 
+  if (isStats) {
+    setResultsHeadingText('Showing stats overview');
+  } else if (isMap) {
+    setResultsHeadingText('Map results update on demand');
+  } else if (!window.lastResultsLoadedSignature) {
+    setResultsHeadingText('Table results will load after filters are applied');
+  }
+
   if (typeof window.syncStatsStatusVisibility === 'function') {
     window.syncStatsStatusVisibility();
   }
@@ -291,20 +310,12 @@ function buildScientificSearchFilter(searchTerm) {
     },
   };
 }
-function handleScientificNameSearch() {
+function syncScientificNameDraftFromInput() {
   const scientificName = $("#scientificNameSearch").val().trim();
   scientificNameSearchText = scientificName;
   window.scientificNameSearchText = scientificNameSearchText;
   scientificNameFilter = scientificName ? buildScientificSearchFilter(scientificName) : null;
-  if (typeof window.updateQueryWithSelectedFacets === 'function') {
-    window.updateQueryWithSelectedFacets();
-  } else {
-    updateQueryWithSelectedFacets();
-  }
-  fetchResults();
-  if (typeof window.markStatsNeedsRefresh === 'function') {
-    window.markStatsNeedsRefresh();
-  }
+  window.scientificNameFilter = scientificNameFilter;
 }
 
 // Fetch & render
@@ -331,6 +342,7 @@ function fetchResults() {
         const totalResults = calculateTotalFromFacets(response.aggregations);
         const startResult = offset + 1;
         const endResult   = Math.min(offset + results.length, totalResults);
+        window.lastResultsLoadedSignature = getCurrentQuerySignature();
         renderResults(results);
         renderFacets(response.aggregations);
         renderSelectedFacets();
@@ -349,6 +361,38 @@ function fetchResults() {
       }
     },
     error: function (error) { hideLoader(); console.error("Error fetching data:", error); }
+  });
+}
+
+function fetchFacetData(options = {}) {
+  const onSuccess = typeof options.onSuccess === 'function' ? options.onSuccess : null;
+  const onError = typeof options.onError === 'function' ? options.onError : null;
+  const facetApiUrl = `${apiUrl.split('?')[0]}?size=0&from=0`;
+  const requestBody = {
+    ...requestData,
+    size: 0,
+    from: 0,
+  };
+
+  return $.ajax({
+    url: facetApiUrl,
+    method: "POST",
+    contentType: "application/json",
+    data: JSON.stringify(requestBody),
+    dataType: "json",
+    success(response) {
+      if (response?.aggregations) {
+        renderFacets(response.aggregations);
+        if (typeof onSuccess === 'function') onSuccess(response);
+        return;
+      }
+      console.error("Unexpected facet response", response);
+      if (typeof onError === 'function') onError(response);
+    },
+    error(error) {
+      console.error("Error fetching facet data:", error);
+      if (typeof onError === 'function') onError(error);
+    }
   });
 }
 
@@ -407,6 +451,9 @@ function renderPagination(totalResults) {
   }
 }
 
+window.fetchFacetData = fetchFacetData;
+window.setResultsHeadingText = setResultsHeadingText;
+
 // Modal
 function showDetailsModal(sourceData) {
   var modal = $("#detailsModal"); var modalBody = $("#modalBody"); modalBody.empty();
@@ -458,18 +505,24 @@ $(document).ready(function () {
   if (typeof window.updateQueryWithSelectedFacets === 'function') {
     window.updateQueryWithSelectedFacets();
   }
-  setActiveMainTab('table');
-
-  // Initial: if table is visible on load, compute dynamic size first
-  if ($('#tableContainer').is(':visible')) {
-    // wait a tick for layout to settle
-    setTimeout(() => { computeDynamicPageSize(); fetchResults(); }, 0);
-  } else {
-    fetchResults();
+  if (typeof window.captureAppliedFilterState === 'function') {
+    window.captureAppliedFilterState();
+  }
+  setActiveMainTab('stats');
+  fetchFacetData();
+  if (typeof window.showInitialStatsView === 'function') {
+    window.showInitialStatsView();
+  } else if (typeof window.fetchStatsData === 'function') {
+    window.fetchStatsData();
   }
 
   $("#downloadButton").click(function () { updateDownloadLink(); if (!downloadLink) { event.preventDefault(); } });
-  $("#searchButton").click(function () { handleScientificNameSearch(); });
+  $("#scientificNameSearch").on("input", function () {
+    syncScientificNameDraftFromInput();
+    if (typeof window.markFiltersPending === 'function') {
+      window.markFiltersPending();
+    }
+  });
 
   $("#showTable").click(function () {
     if (typeof window.cancelBoundingBoxSelection === 'function') {
@@ -479,6 +532,12 @@ $(document).ready(function () {
       window.cancelMapDataLoading();
     }
     setActiveMainTab('table');
+    if (typeof window.hasPendingFilterChanges === 'function' && window.hasPendingFilterChanges()) {
+      return;
+    }
+    if (window.lastResultsLoadedSignature === getCurrentQuerySignature()) {
+      return;
+    }
     computeDynamicPageSize();
     fetchResults();
   });
@@ -499,7 +558,21 @@ $(document).ready(function () {
       window.cancelMapDataLoading();
     }
     setActiveMainTab('stats');
-    if (typeof window.fetchStatsData === 'function') {
+    if (typeof window.hasPendingFilterChanges === 'function' && window.hasPendingFilterChanges()) {
+      if (typeof window.syncStatsStatusVisibility === 'function') {
+        window.syncStatsStatusVisibility();
+      }
+      return;
+    }
+    if (typeof window.hasRenderedStats === 'function' && window.hasRenderedStats()) {
+      if (typeof window.syncStatsStatusVisibility === 'function') {
+        window.syncStatsStatusVisibility();
+      }
+      return;
+    }
+    if (typeof window.showInitialStatsView === 'function') {
+      window.showInitialStatsView();
+    } else if (typeof window.fetchStatsData === 'function') {
       window.fetchStatsData();
     }
   });

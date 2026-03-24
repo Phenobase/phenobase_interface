@@ -1,0 +1,50 @@
+{
+  "project": "Phenobase",
+  "entries": [
+    {
+      "datasetVersion": "2026.03.23",
+      "publishedAt": "2026-03-23",
+      "recordCount": 71208823,
+      "title": "Loading most recent iNaturalist Data",
+      "summary": "Expanded the production dataset from approximately 40 million to 71 million records.",
+      "methodology": [
+        "Loaded the latest machine annotated images from iNaturalist photos into the production search index.",
+        "Rebuilt the index used by the Phenobase interface queries.",
+        "Verified that datasource, decade, family, genus, and mapped-trait aggregations completed after the load."
+      ],
+      "changes": [
+        "Increased the searchable record count available in the interface.",
+        "Updated the global stats overview to reflect the expanded dataset.",
+        "Confirmed that the public interface continued querying the production index after the refresh."
+      ]
+    },
+    {
+      "datasetVersion": "2025.10.10",
+      "publishedAt": "2025-10-10",
+      "recordCount": 22975736,
+      "title": "National Phenology Network Data Updated",
+      "summary": "",
+      "methodology": [
+        "Uploaded National Phenology Network Data into interface.",
+        "Confirmed trait mappings and transformatinon file work."
+      ],
+      "changes": [
+        "Published the 22.9 million records to the public interface."
+      ]
+    },
+    {
+      "datasetVersion": "2025.09.10",
+      "publishedAt": "2025-09-10",
+      "recordCount": 2959908,
+      "title": "Herbarium Data from GBIF",
+      "summary": "",
+      "methodology": [
+        "Loaded the Herbarium Images from GBIF.",
+        "Confirmed counts and tested interface."
+      ],
+      "changes": [
+        "Published the 2.9 million records to the public interface."
+      ]
+    }
+  ]
+}

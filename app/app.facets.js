@@ -93,6 +93,8 @@
   let lastUnlockedPresenceMode = portalFilters.presenceMode || 'both';
   let traitModeWarningTimer = null;
   let maxDecadeCount = 0;
+  let appliedFilterState = null;
+  let filtersDirty = false;
 
   // -----------------------
   // Helpers
@@ -115,16 +117,159 @@
     return String(v || '').trim().toLowerCase();
   }
 
+  function cloneSelectedFacetsState(source) {
+    const clone = {};
+    Object.entries(source || {}).forEach(([field, values]) => {
+      const normalized = toArray(values)
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+      if (normalized.length) clone[field] = normalized.slice();
+    });
+    return clone;
+  }
+
+  function clonePortalFilterState(source) {
+    const bounds = normalizeGeoBounds(source?.geoBounds);
+    return {
+      presenceMode: String(source?.presenceMode || 'both').toLowerCase(),
+      decadeStart: clampDecadeStart(source?.decadeStart, MIN_DECADE_START),
+      decadeEnd: clampDecadeStart(source?.decadeEnd, MAX_DECADE_START),
+      selectedPhenophases: toArray(source?.selectedPhenophases)
+        .map((value) => normalizeLower(value))
+        .filter(Boolean),
+      geoBounds: bounds ? {
+        minLat: bounds.minLat,
+        maxLat: bounds.maxLat,
+        minLon: bounds.minLon,
+        maxLon: bounds.maxLon,
+      } : null,
+      traitMode: source?.traitMode === 'all' ? 'all' : 'simple',
+    };
+  }
+
+  function getCurrentFilterState() {
+    return {
+      selectedFacets: cloneSelectedFacetsState(window.selectedFacets || {}),
+      portalFilters: clonePortalFilterState(portalFilters),
+      scientificName: String(window.scientificNameSearchText || '').trim(),
+    };
+  }
+
+  function buildScientificFilterForText(searchText) {
+    if (!searchText) return null;
+    if (typeof window.buildScientificSearchFilter === 'function') {
+      return window.buildScientificSearchFilter(searchText);
+    }
+    return null;
+  }
+
+  function statesEqual(a, b) {
+    try {
+      return JSON.stringify(a || {}) === JSON.stringify(b || {});
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function refreshFilterApplyUi() {
+    const message = document.getElementById('filterPendingMessage');
+    const applyButton = document.getElementById('applyFiltersButton');
+    const resetButton = document.getElementById('resetDraftFiltersButton');
+
+    if (message) {
+      message.textContent = filtersDirty
+        ? 'You have unapplied filter changes.'
+        : 'Filters are up to date.';
+      message.classList.toggle('is-dirty', filtersDirty);
+      message.classList.toggle('is-clean', !filtersDirty);
+    }
+
+    if (applyButton) applyButton.disabled = !filtersDirty;
+    if (resetButton) resetButton.disabled = !filtersDirty;
+  }
+
+  function recomputeFilterDirtyState() {
+    filtersDirty = appliedFilterState ? !statesEqual(getCurrentFilterState(), appliedFilterState) : false;
+    refreshFilterApplyUi();
+  }
+
+  function captureAppliedFilterState() {
+    appliedFilterState = getCurrentFilterState();
+    recomputeFilterDirtyState();
+  }
+
+  function applyFilterStateSnapshot(snapshot) {
+    const nextState = snapshot || {
+      selectedFacets: {},
+      portalFilters: clonePortalFilterState(portalFilters),
+      scientificName: '',
+    };
+
+    window.selectedFacets = cloneSelectedFacetsState(nextState.selectedFacets || {});
+    selectedFacets = window.selectedFacets;
+
+    const nextPortalFilters = clonePortalFilterState(nextState.portalFilters || {});
+    portalFilters.presenceMode = nextPortalFilters.presenceMode;
+    portalFilters.decadeStart = nextPortalFilters.decadeStart;
+    portalFilters.decadeEnd = nextPortalFilters.decadeEnd;
+    portalFilters.selectedPhenophases = nextPortalFilters.selectedPhenophases.slice();
+    portalFilters.geoBounds = nextPortalFilters.geoBounds ? { ...nextPortalFilters.geoBounds } : null;
+    portalFilters.traitMode = nextPortalFilters.traitMode;
+
+    const scientificName = String(nextState.scientificName || '').trim();
+    window.scientificNameSearchText = scientificName;
+    if (typeof scientificNameSearchText !== 'undefined') scientificNameSearchText = scientificName;
+
+    const builtScientificFilter = buildScientificFilterForText(scientificName);
+    window.scientificNameFilter = builtScientificFilter;
+    if (typeof scientificNameFilter !== 'undefined') scientificNameFilter = builtScientificFilter;
+
+    if ($('#scientificNameSearch').length) $('#scientificNameSearch').val(scientificName);
+  }
+
   function resetPaging() {
     if (typeof window.currentPage !== 'undefined') window.currentPage = 1;
   }
 
-  function runSearchForFilterChange() {
+  function markFiltersPending() {
+    recomputeFilterDirtyState();
+    renderSelectedFacets();
+    updateQuerySummary();
+  }
+
+  function applyPendingFilters() {
     resetPaging();
     updateQueryWithSelectedFacets();
-    if (typeof window.fetchResults === 'function') {
-      window.fetchResults();
+    captureAppliedFilterState();
+
+    if (typeof window.markMapNeedsRender === 'function') {
+      window.markMapNeedsRender();
     }
+
+    const activeTab = String(window.currentMainTab || 'stats').toLowerCase();
+    if (activeTab === 'table') {
+      if (typeof window.fetchResults === 'function') {
+        window.fetchResults();
+      }
+      if (typeof window.markStatsNeedsRefresh === 'function') {
+        window.markStatsNeedsRefresh();
+      }
+      return;
+    }
+
+    if (typeof window.fetchFacetData === 'function') {
+      window.fetchFacetData();
+    }
+
+    if (activeTab === 'stats') {
+      if (typeof window.showInitialStatsView === 'function') {
+        window.showInitialStatsView();
+      } else if (typeof window.fetchStatsData === 'function') {
+        window.fetchStatsData();
+      }
+      return;
+    }
+
     if (typeof window.markStatsNeedsRefresh === 'function') {
       window.markStatsNeedsRefresh();
     }
@@ -468,14 +613,12 @@
 
     if (hadSelections && fromUser) {
       showTraitModeWarning(`Switched to ${nextMode === 'all' ? 'All traits' : 'Simple terms'}. Previous trait selections were cleared.`);
-      runSearchForFilterChange();
+      markFiltersPending();
       return;
     }
 
     clearTraitModeWarning();
-    updateQueryWithSelectedFacets();
-    updateQuerySummary();
-    renderSelectedFacets();
+    markFiltersPending();
   }
 
   function updateQuerySummary() {
@@ -515,6 +658,10 @@
     const bounds = normalizeGeoBounds(portalFilters.geoBounds);
     if (bounds) {
       parts.push(`Geo: lat ${bounds.minLatText}..${bounds.maxLatText}, lon ${bounds.minLonText}..${bounds.maxLonText}`);
+    }
+
+    if (filtersDirty) {
+      parts.push('Pending apply');
     }
 
     el.textContent = parts.length ? `| ${parts.join(' | ')}` : '';
@@ -681,7 +828,8 @@
     }
     window.selectedFacets = selectedFacets;
 
-    runSearchForFilterChange();
+    syncPresenceModeFromSelectedSources();
+    markFiltersPending();
   }
 
   function removeFacet(field, value) {
@@ -692,13 +840,20 @@
     if (!selectedFacets[field].length) delete selectedFacets[field];
 
     window.selectedFacets = selectedFacets;
-    runSearchForFilterChange();
+    syncPresenceModeFromSelectedSources();
+    markFiltersPending();
   }
 
   window.addFacet = addFacet;
   window.removeFacet = removeFacet;
   window.updateQueryWithSelectedFacets = updateQueryWithSelectedFacets;
   window.initializePortalFiltersFromUrl = initializePortalFiltersFromUrl;
+  window.applyPendingFilters = applyPendingFilters;
+  window.markFiltersPending = markFiltersPending;
+  window.captureAppliedFilterState = captureAppliedFilterState;
+  window.hasPendingFilterChanges = function hasPendingFilterChanges() {
+    return !!filtersDirty;
+  };
 
   // -----------------------
   // Presence mode locking
@@ -923,7 +1078,7 @@
         portalFilters.decadeStart = DECADE_STARTS[ui.values[0]];
         portalFilters.decadeEnd = DECADE_STARTS[ui.values[1]];
         updateDecadeSliderAccessibility();
-        runSearchForFilterChange();
+        markFiltersPending();
       },
     });
 
@@ -941,18 +1096,20 @@
     const $setGeoOnMap = $('#setGeoBoundsOnMap');
     const $traitModeSimple = $('#traitModeSimple');
     const $traitModeAll = $('#traitModeAll');
+    const $applyFilters = $('#applyFiltersButton');
+    const $resetDraft = $('#resetDraftFiltersButton');
 
     window.onMapBBoxSelected = function (bounds) {
       portalFilters.geoBounds = normalizeGeoBounds(bounds);
       syncUiFromState();
-      runSearchForFilterChange();
+      markFiltersPending();
     };
 
     window.onMapBBoxCleared = function () {
       if (!portalFilters.geoBounds) return;
       portalFilters.geoBounds = null;
       syncUiFromState();
-      runSearchForFilterChange();
+      markFiltersPending();
     };
 
     initializeYearSlider();
@@ -986,7 +1143,7 @@
       if (presenceModeLocked) return;
       portalFilters.presenceMode = String($(this).val() || 'both').toLowerCase();
       lastUnlockedPresenceMode = portalFilters.presenceMode;
-      runSearchForFilterChange();
+      markFiltersPending();
     });
 
     $('#phenophaseFilters').on('change', '.phenophase-check', function () {
@@ -995,7 +1152,7 @@
       if (this.checked) selected.add(phase);
       else selected.delete(phase);
       portalFilters.selectedPhenophases = Array.from(selected);
-      runSearchForFilterChange();
+      markFiltersPending();
     });
 
     $clearGeo.on('click', function () {
@@ -1004,7 +1161,7 @@
         window.clearSelectedBoundingBoxOverlay();
       }
       syncUiFromState();
-      runSearchForFilterChange();
+      markFiltersPending();
     });
 
     $setGeoOnMap.on('click', function () {
@@ -1019,15 +1176,29 @@
           onComplete: function (bounds) {
             portalFilters.geoBounds = normalizeGeoBounds(bounds);
             syncUiFromState();
-            runSearchForFilterChange();
+            markFiltersPending();
           },
           onCancel: function () {},
         });
       }, 180);
     });
 
+    $applyFilters.on('click', function () {
+      applyPendingFilters();
+    });
+
+    $resetDraft.on('click', function () {
+      if (!appliedFilterState) return;
+      applyFilterStateSnapshot(appliedFilterState);
+      syncUiFromState();
+      renderSelectedFacets();
+      recomputeFilterDirtyState();
+      updateQuerySummary();
+    });
+
     initializedCustomControls = true;
     syncUiFromState();
+    refreshFilterApplyUi();
   }
 
   // -----------------------
@@ -1138,7 +1309,7 @@
         }
 
         syncUiFromState();
-        runSearchForFilterChange();
+        markFiltersPending();
         return;
       }
 
@@ -1158,7 +1329,7 @@
       resetCustomFilters();
       syncUiFromState();
 
-      runSearchForFilterChange();
+      markFiltersPending();
     });
 
     updateQuerySummary();
@@ -1301,5 +1472,6 @@
 
   $(document).ready(function () {
     bindCustomControls();
+    captureAppliedFilterState();
   });
 })();

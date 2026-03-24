@@ -18,6 +18,232 @@ const statsLoadState = {
   statusMessage: "",
   statusTone: "info",
 };
+const GLOBAL_STATS_SNAPSHOT_URL = String(window.phenobaseGlobalStatsSnapshotUrl || "global-stats-snapshot.json");
+const DATA_RELEASE_HISTORY_URL = String(window.phenobaseDataReleaseHistoryUrl || "data-release-history.json");
+const STATS_SIMPLE_PHASES = [
+  { key: "unfolded true leaf", label: "Unfolded true leaf" },
+  { key: "breaking vegetative bud", label: "Breaking vegetative bud" },
+  { key: "senescing true leaf", label: "Senescing true leaf" },
+  { key: "flower", label: "Flower" },
+  { key: "open flower", label: "Open flower" },
+  { key: "simple fruit or compound fruit", label: "Simple or compound fruit" },
+  { key: "ripe fruit", label: "Ripe fruit" },
+];
+let dataReleaseHistoryPromise = null;
+let globalStatsSnapshotPromise = null;
+
+function currentStatsQuery() {
+  return window.requestData?.query || { match_all: {} };
+}
+
+function isUnfilteredStatsQuery(query) {
+  if (!query || typeof query !== "object") return false;
+  if (query.match_all) return true;
+  const must = query?.bool?.must;
+  return Array.isArray(must) && must.length === 0;
+}
+
+function formatStatsSnapshotTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString();
+}
+
+function formatReleaseDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function getDataReleaseHistoryContainer() {
+  return document.getElementById("dataReleaseHistorySection");
+}
+
+function shouldUseGlobalSummaryStats() {
+  return isUnfilteredStatsQuery(currentStatsQuery());
+}
+
+function summaryAggNameForPhase(phaseKey, suffix) {
+  return `${String(phaseKey || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${suffix}`;
+}
+
+function clearDataReleaseHistorySection() {
+  const container = getDataReleaseHistoryContainer();
+  if (!container) return;
+  container.innerHTML = "";
+}
+
+function snapshotHasCommonAggregations(snapshot) {
+  return !!(
+    snapshot?.aggregations?.datasource_0
+    && snapshot?.aggregations?.decadeDistribution_1
+    && snapshot?.aggregations?.family_2
+    && snapshot?.aggregations?.genus_3
+  );
+}
+
+function isUsableGlobalStatsSnapshot(snapshot) {
+  if (snapshot?.ready !== true) return false;
+  if (!snapshotHasCommonAggregations(snapshot)) return false;
+  if (snapshot?.summaryOnly) {
+    return !!snapshot?.aggregations?.phenophasePresenceSummary_4;
+  }
+  return !!snapshot?.aggregations?.mappedTraitsByDecade_4;
+}
+
+function releaseHistoryEntriesSorted(payload) {
+  const entries = Array.isArray(payload?.entries) ? payload.entries.slice() : [];
+  return entries.sort((a, b) => {
+    const aTime = new Date(a?.publishedAt || 0).getTime();
+    const bTime = new Date(b?.publishedAt || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+async function getDataReleaseHistory() {
+  if (dataReleaseHistoryPromise) return dataReleaseHistoryPromise;
+
+  dataReleaseHistoryPromise = $.getJSON(DATA_RELEASE_HISTORY_URL)
+    .then((payload) => payload)
+    .catch((error) => {
+      console.warn("Failed to load data release history:", error);
+      dataReleaseHistoryPromise = null;
+      return null;
+    });
+
+  return dataReleaseHistoryPromise;
+}
+
+async function getGlobalStatsSnapshot() {
+  if (window.phenobaseGlobalStatsSnapshot?.aggregations) {
+    return window.phenobaseGlobalStatsSnapshot;
+  }
+
+  if (globalStatsSnapshotPromise) return globalStatsSnapshotPromise;
+
+  globalStatsSnapshotPromise = $.getJSON(GLOBAL_STATS_SNAPSHOT_URL)
+    .then((payload) => payload)
+    .catch((error) => {
+      console.warn("Failed to load global stats snapshot:", error);
+      globalStatsSnapshotPromise = null;
+      return null;
+    });
+
+  return globalStatsSnapshotPromise;
+}
+
+function appendReleaseHistoryList(title, items, container) {
+  const cleanedItems = Array.isArray(items)
+    ? items.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (!cleanedItems.length || !container) return;
+
+  const subtitle = document.createElement("div");
+  subtitle.className = "release-history-subtitle";
+  subtitle.textContent = title;
+  container.appendChild(subtitle);
+
+  const list = document.createElement("ul");
+  list.className = "release-history-points";
+  cleanedItems.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    list.appendChild(li);
+  });
+  container.appendChild(list);
+}
+
+function renderDataReleaseHistory(payload) {
+  const container = getDataReleaseHistoryContainer();
+  if (!container) return;
+
+  const entries = releaseHistoryEntriesSorted(payload);
+  if (!entries.length) {
+    clearDataReleaseHistorySection();
+    return;
+  }
+
+  container.innerHTML = "";
+
+  const wrap = document.createElement("section");
+  wrap.className = "release-history-wrap";
+
+  const title = document.createElement("h3");
+  title.className = "stats-section-title";
+  title.textContent = "Data Release History";
+  wrap.appendChild(title);
+
+  const intro = document.createElement("p");
+  intro.className = "stats-note";
+  intro.textContent = "Most recent data loads are shown first. Edit app/data-release-history.json to add new release notes and publication methodology entries.";
+  wrap.appendChild(intro);
+
+  const list = document.createElement("div");
+  list.className = "release-history-list";
+
+  entries.forEach((entry) => {
+    const card = document.createElement("article");
+    card.className = "release-history-card";
+
+    const header = document.createElement("div");
+    header.className = "release-history-header";
+
+    const version = document.createElement("h4");
+    version.className = "release-history-version";
+    version.textContent = entry?.title
+      ? `${entry.title} (${entry.datasetVersion || "Unversioned"})`
+      : String(entry?.datasetVersion || "Unversioned release");
+    header.appendChild(version);
+
+    const date = document.createElement("div");
+    date.className = "release-history-date";
+    date.textContent = formatReleaseDate(entry?.publishedAt);
+    header.appendChild(date);
+    card.appendChild(header);
+
+    const summary = document.createElement("p");
+    summary.className = "release-history-summary";
+    summary.textContent = String(entry?.summary || "");
+    card.appendChild(summary);
+
+    if (entry?.recordCount) {
+      const meta = document.createElement("p");
+      meta.className = "release-history-meta";
+      meta.textContent = `Record count: ${Number(entry.recordCount).toLocaleString()}`;
+      card.appendChild(meta);
+    }
+
+    appendReleaseHistoryList("Methodology", entry?.methodology, card);
+    appendReleaseHistoryList("Changes", entry?.changes, card);
+    appendReleaseHistoryList("Notes", entry?.notes, card);
+
+    list.appendChild(card);
+  });
+
+  wrap.appendChild(list);
+  container.appendChild(wrap);
+}
+
+async function refreshDataReleaseHistorySection() {
+  if (!isUnfilteredStatsQuery(currentStatsQuery())) {
+    clearDataReleaseHistorySection();
+    return;
+  }
+
+  const payload = await getDataReleaseHistory();
+  if (!payload) {
+    clearDataReleaseHistorySection();
+    return;
+  }
+
+  renderDataReleaseHistory(payload);
+}
 
 function getStatsStatusEl() {
   return document.getElementById("statsStatus");
@@ -218,7 +444,7 @@ function markStatsNeedsRefresh() {
     statsLoadState.completed = false;
   }
 
-  if ($("#statsContainer").is(":visible")) {
+  if ($("#statsContainer").is(":visible") && statsLoadState.stale) {
     setStatsStatus('Stats are out of date for the current filters. Click "Refresh Stats" to update. If the query is broad, try filtering by phenophase, scientific name, geographic scope, or time period.', "info");
   }
 }
@@ -300,16 +526,25 @@ function ensureStatsDecadeHistogramPlugin() {
       if (!meta?.data?.length || !dataset?.data?.length) return;
 
       const ctx = chart.ctx;
+      const chartArea = chart.chartArea || {};
+      const fixedLabelY = Math.max(
+        Number(chartArea.top || 0) + 18,
+        Number(chartArea.bottom || 0) - (options.verticalOffset || 24)
+      );
       ctx.save();
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
       ctx.fillStyle = options.color || "#1f2937";
-      ctx.font = options.font || "11px sans-serif";
+      ctx.font = options.font || "italic 11px sans-serif";
 
       meta.data.forEach((bar, index) => {
         const value = Number(dataset.data[index]);
         if (!Number.isFinite(value) || value <= 0) return;
-        ctx.fillText(value.toLocaleString(), bar.x, bar.y - 4);
+        ctx.save();
+        ctx.translate(bar.x, fixedLabelY);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(value.toLocaleString(), 0, 0);
+        ctx.restore();
       });
 
       ctx.restore();
@@ -346,52 +581,65 @@ function getStatsDecadeBounds() {
 function buildStatsRequestData(traitAggConfig) {
   const query = window.requestData?.query || { match_all: {} };
   const decadeBounds = getStatsDecadeBounds();
+  const summaryOnly = shouldUseGlobalSummaryStats();
 
-  return {
-    size: 0,
-    track_total_hits: false,
-    query,
-    aggs: {
-      datasource_0: { terms: { field: "dataSource", size: 10 } },
-      decadeDistribution_1: {
-        histogram: {
-          field: "decadeStart",
-          interval: 10,
-          min_doc_count: 0,
-          extended_bounds: {
-            min: decadeBounds.min,
-            max: decadeBounds.max,
-          },
+  const aggs = {
+    datasource_0: { terms: { field: "dataSource", size: 10 } },
+    decadeDistribution_1: {
+      histogram: {
+        field: "decadeStart",
+        interval: 10,
+        min_doc_count: 0,
+        extended_bounds: {
+          min: decadeBounds.min,
+          max: decadeBounds.max,
         },
       },
-      family_2: { terms: { field: "family", size: 50 } },
-      genus_3: { terms: { field: "genus", size: 50 } },
-      mappedTraitsByDecade_4: {
-        terms: traitAggConfig.terms,
-        aggs: {
-          doy_records: {
-            filter: { exists: { field: "dayOfYear" } },
-            aggs: {
-              decades: {
-                histogram: {
-                  field: "decadeStart",
-                  interval: 10,
-                  min_doc_count: 0,
-                  extended_bounds: {
-                    min: decadeBounds.min,
-                    max: decadeBounds.max,
-                  },
+    },
+    family_2: { terms: { field: "family", size: 50 } },
+    genus_3: { terms: { field: "genus", size: 50 } },
+  };
+
+  if (summaryOnly) {
+    aggs.phenophasePresenceSummary_4 = {
+      filters: {
+        filters: STATS_SIMPLE_PHASES.reduce((filters, phase) => {
+          filters[summaryAggNameForPhase(phase.key, "present")] = {
+            term: { mappedTraits: `${phase.key} present` },
+          };
+          filters[summaryAggNameForPhase(phase.key, "absent")] = {
+            term: { mappedTraits: `${phase.key} absent` },
+          };
+          return filters;
+        }, {}),
+      },
+    };
+  } else {
+    aggs.mappedTraitsByDecade_4 = {
+      terms: traitAggConfig.terms,
+      aggs: {
+        doy_records: {
+          filter: { exists: { field: "dayOfYear" } },
+          aggs: {
+            decades: {
+              histogram: {
+                field: "decadeStart",
+                interval: 10,
+                min_doc_count: 0,
+                extended_bounds: {
+                  min: decadeBounds.min,
+                  max: decadeBounds.max,
                 },
-                aggs: {
-                  doy_histogram: {
-                    histogram: {
-                      field: "dayOfYear",
-                      interval: 1,
-                      min_doc_count: 0,
-                      extended_bounds: {
-                        min: STATS_MIN_DOY,
-                        max: STATS_MAX_DOY,
-                      },
+              },
+              aggs: {
+                doy_histogram: {
+                  histogram: {
+                    field: "dayOfYear",
+                    interval: 1,
+                    min_doc_count: 0,
+                    extended_bounds: {
+                      min: STATS_MIN_DOY,
+                      max: STATS_MAX_DOY,
                     },
                   },
                 },
@@ -400,7 +648,14 @@ function buildStatsRequestData(traitAggConfig) {
           },
         },
       },
-    },
+    };
+  }
+
+  return {
+    size: 0,
+    track_total_hits: false,
+    query,
+    aggs,
   };
 }
 
@@ -1052,8 +1307,59 @@ function renderTraitDecadeCharts(aggregations) {
   container.appendChild(grid);
 }
 
-function renderStats(aggregations) {
+function renderGlobalPhenophaseSummary(aggregations) {
+  const container = document.getElementById("mappedTraitsTable");
+  if (!container) return;
+  container.innerHTML = "";
+  const summaryNoteText = "This lighter global summary shows high-level present and absent counts for the main simple phenophases. Detailed day-of-year trait charts are skipped here so the global overview renders faster.";
+
+  const buckets = aggregations?.phenophasePresenceSummary_4?.buckets || {};
+  const rows = STATS_SIMPLE_PHASES.map((phase) => {
+    const present = Number(buckets?.[summaryAggNameForPhase(phase.key, "present")]?.doc_count || 0);
+    const absent = Number(buckets?.[summaryAggNameForPhase(phase.key, "absent")]?.doc_count || 0);
+    return {
+      label: phase.label,
+      present,
+      absent,
+      total: present + absent,
+    };
+  }).sort((a, b) => b.total - a.total);
+
+  if (!rows.some((row) => row.total > 0)) {
+    const empty = document.createElement("div");
+    empty.className = "stats-empty-state";
+    empty.textContent = "No phenophase summary is available for the current filters.";
+    container.appendChild(empty);
+    return;
+  }
+
+  renderTable(
+    "mappedTraitsTable",
+    ["Phenophase", "Present", "Absent", "Total"],
+    rows.map((row) => [
+      row.label,
+      row.present.toLocaleString(),
+      row.absent.toLocaleString(),
+      row.total.toLocaleString(),
+    ]),
+    "Phenophase Presence Summary"
+  );
+
+  const renderedTable = container.querySelector("table");
+  if (renderedTable) renderedTable.classList.add("table-striped");
+
+  const renderedTitle = container.querySelector(".stats-section-title");
+  if (renderedTitle) {
+    const renderedNote = document.createElement("p");
+    renderedNote.className = "stats-note";
+    renderedNote.textContent = summaryNoteText;
+    renderedTitle.insertAdjacentElement("afterend", renderedNote);
+  }
+}
+
+function renderStats(aggregations, options = {}) {
   destroyStatsCharts();
+  const summaryOnly = !!options.summaryOnly;
 
   const datasourceBuckets = aggregations?.datasource_0?.buckets || [];
   renderTable(
@@ -1065,7 +1371,11 @@ function renderStats(aggregations) {
 
   renderDecadeDistributionChart(aggregations);
 
-  renderTraitDecadeCharts(aggregations);
+  if (summaryOnly) {
+    renderGlobalPhenophaseSummary(aggregations);
+  } else {
+    renderTraitDecadeCharts(aggregations);
+  }
 
   const familyBuckets = aggregations?.family_2?.buckets || [];
   renderTopDistributionChart("familyTable", familyBuckets, {
@@ -1090,20 +1400,75 @@ function renderStats(aggregations) {
     step: 20,
     baseLimit: 20,
   });
+
+  refreshDataReleaseHistorySection();
+}
+
+function isSummaryOnlyStatsSnapshot(snapshot) {
+  if (snapshot?.summaryOnly != null) return !!snapshot.summaryOnly;
+  return !!snapshot?.aggregations?.phenophasePresenceSummary_4 && !snapshot?.aggregations?.mappedTraitsByDecade_4;
+}
+
+async function renderPrebuiltGlobalStatsSnapshot() {
+  const snapshot = await getGlobalStatsSnapshot();
+  if (!snapshot?.aggregations) return false;
+  if (!isUnfilteredStatsQuery(currentStatsQuery())) return false;
+  if (!isUsableGlobalStatsSnapshot(snapshot)) return false;
+
+  window.lastStatsMeta = { traitNote: snapshot.traitNote || "" };
+  renderStats(snapshot.aggregations, { summaryOnly: isSummaryOnlyStatsSnapshot(snapshot) });
+  statsLoadState.activeRequest = null;
+  statsLoadState.loading = false;
+  statsLoadState.completed = true;
+  statsLoadState.stale = false;
+  statsLoadState.signature = getStatsQuerySignature();
+
+  const generatedAt = formatStatsSnapshotTimestamp(snapshot.generatedAt || snapshot.cachedAt);
+  const suffix = generatedAt ? ` from ${generatedAt}` : "";
+  setStatsStatus(`Showing prebuilt global summary${suffix}. Click "Refresh Stats" to request live data.`, "info");
+  if (typeof window.setResultsHeadingText === "function") {
+    window.setResultsHeadingText("Showing global stats snapshot");
+  }
+  return true;
+}
+
+function showInitialStatsView() {
+  if (!shouldUseGlobalSummaryStats()) return fetchStatsData();
+
+  return renderPrebuiltGlobalStatsSnapshot().then((rendered) => {
+    if (rendered) return null;
+    return fetchStatsData();
+  });
 }
 
 async function fetchStatsData() {
   const requestId = ++statsLoadState.requestId;
   const signature = getStatsQuerySignature();
+  const summaryOnly = shouldUseGlobalSummaryStats();
 
   abortActiveStatsRequest();
   statsLoadState.loading = true;
   statsLoadState.stale = false;
+  refreshDataReleaseHistorySection();
+
+  if (window.currentMainTab === "stats" && typeof showLoader === "function") {
+    showLoader(summaryOnly ? "Loading global summary..." : "Loading stats...", 16);
+  }
 
   setStatsStatus("Stats are refreshing... please wait.", "info");
 
-  const statsMeta = await getStatsTraitAggregationConfig();
-  if (requestId !== statsLoadState.requestId) return null;
+  const statsMeta = summaryOnly
+    ? { note: "Showing a lighter high-level phenophase summary for the unfiltered global view." }
+    : await getStatsTraitAggregationConfig();
+  if (requestId !== statsLoadState.requestId) {
+    if (typeof hideLoader === "function") {
+      hideLoader();
+    }
+    return null;
+  }
+  if (window.currentMainTab === "stats" && typeof setLoaderStage === "function") {
+    setLoaderStage(summaryOnly ? "Summarizing global records..." : "Preparing stats charts...", 42);
+  }
   const requestBody = buildStatsRequestData(statsMeta);
 
   const request = $.ajax({
@@ -1116,29 +1481,49 @@ async function fetchStatsData() {
       if (requestId !== statsLoadState.requestId) return;
       statsLoadState.activeRequest = null;
       statsLoadState.loading = false;
+      if (typeof setLoaderStage === "function") {
+        setLoaderStage(summaryOnly ? "Rendering global summary..." : "Rendering stats...", 92);
+      }
 
       if (response && response.aggregations) {
         window.lastStatsMeta = { traitNote: statsMeta.note };
-        renderStats(response.aggregations);
+        renderStats(response.aggregations, { summaryOnly });
         statsLoadState.signature = signature;
         statsLoadState.completed = true;
         statsLoadState.stale = false;
-        setStatsStatus("Stats updated.", "success");
+        setStatsStatus(summaryOnly ? "Global summary updated." : "Stats updated.", "success");
+        if (typeof window.setResultsHeadingText === "function" && window.currentMainTab === "stats") {
+          window.setResultsHeadingText(isUnfilteredStatsQuery(currentStatsQuery()) ? "Showing global stats overview" : "Showing filtered stats");
+        }
+        if (typeof hideLoader === "function") {
+          hideLoader();
+        }
         return;
       }
 
       console.error("No aggregations in response.");
       statsLoadState.completed = false;
       statsLoadState.stale = true;
+      if (typeof hideLoader === "function") {
+        hideLoader();
+      }
       setStatsStatus('No stats data is available for the current filters. Click "Refresh Stats" to try again. If needed, narrow by phenophase, scientific name, geographic scope, or time period.', "error");
     },
     error(error) {
-      if (error?.statusText === "abort") return;
+      if (error?.statusText === "abort") {
+        if (typeof hideLoader === "function") {
+          hideLoader();
+        }
+        return;
+      }
       if (requestId !== statsLoadState.requestId) return;
       statsLoadState.activeRequest = null;
       statsLoadState.loading = false;
       statsLoadState.completed = false;
       statsLoadState.stale = true;
+      if (typeof hideLoader === "function") {
+        hideLoader();
+      }
       console.error("Error fetching stats:", error);
       const reason = error?.responseJSON?.error?.reason
         || error?.responseJSON?.error?.root_cause?.[0]?.reason
@@ -1155,6 +1540,10 @@ async function fetchStatsData() {
 
 window.fetchStatsData = fetchStatsData;
 window.markStatsNeedsRefresh = markStatsNeedsRefresh;
+window.showInitialStatsView = showInitialStatsView;
+window.hasRenderedStats = function hasRenderedStats() {
+  return !!statsLoadState.completed && !statsLoadState.stale;
+};
 
 $(document).ready(function () {
   const refreshBtn = document.getElementById("refreshStatsButton");
@@ -1165,7 +1554,9 @@ $(document).ready(function () {
     refreshBtn.dataset.bound = "true";
   }
 
-  markStatsNeedsRefresh();
+  if (!statsLoadState.loading && !statsLoadState.completed) {
+    markStatsNeedsRefresh();
+  }
 });
 
 window.syncStatsStatusVisibility = syncStatsStatusVisibility;
