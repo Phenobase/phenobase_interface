@@ -1274,29 +1274,12 @@
       .filter(Boolean);
   }
 
-  function normalizeSelectedDataSourcesAgainstAvailable() {
-    selectedFacets = window.selectedFacets || {};
-    const selectedSources = toArray(selectedFacets.dataSource)
-      .map((value) => String(value || '').trim())
-      .filter(Boolean);
-    if (!selectedSources.length || !availableDataSources.length) return false;
-
-    const selectedSet = new Set(selectedSources);
-    if (selectedSet.size !== availableDataSources.length) return false;
-    if (!availableDataSources.every((source) => selectedSet.has(source))) return false;
-
-    delete selectedFacets.dataSource;
-    window.selectedFacets = selectedFacets;
-    return true;
-  }
-
   // -----------------------
   // Main entry from fetchResults success
   // -----------------------
   function renderFacets(aggregations) {
     selectedFacets = window.selectedFacets || {};
     updateAvailableDataSources(aggregations);
-    const normalizedAllSources = normalizeSelectedDataSourcesAgainstAvailable();
 
     $('#dataSourceFacets').empty();
     $('#allTraitsFilters').empty();
@@ -1312,7 +1295,6 @@
 
     renderSelectedFacets();
     updateQuerySummary();
-    if (normalizedAllSources) syncPortalStateToUrl();
   }
 
   window.renderFacets = renderFacets;
