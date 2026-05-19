@@ -9,13 +9,19 @@
   // -----------------------
   const HIDDEN_TRAIT = 'plant structure present';
   const TIME_CONFIG = window.phenobaseTimeConfig || {};
-  const MIN_YEAR = Number.isFinite(Number(TIME_CONFIG.minYear)) ? Math.round(Number(TIME_CONFIG.minYear)) : 1800;
+  const SELECTOR_MIN_YEAR = Number.isFinite(Number(TIME_CONFIG.selectorMinYear)) ? Math.round(Number(TIME_CONFIG.selectorMinYear)) : 1500;
+  const DEFAULT_FILTER_MIN_YEAR = Number.isFinite(Number(TIME_CONFIG.minYear)) ? Math.round(Number(TIME_CONFIG.minYear)) : 1970;
   const CURRENT_YEAR = Number.isFinite(Number(TIME_CONFIG.maxYear)) ? Math.round(Number(TIME_CONFIG.maxYear)) : new Date().getFullYear();
-  const MIN_DECADE_START = Math.floor(MIN_YEAR / 10) * 10;
+  const MIN_DECADE_START = Math.floor(SELECTOR_MIN_YEAR / 10) * 10;
+  const DEFAULT_FILTER_DECADE_START = Math.floor(DEFAULT_FILTER_MIN_YEAR / 10) * 10;
   const MAX_DECADE_START = Math.floor(CURRENT_YEAR / 10) * 10;
+  const PRE_1960_DECADE_START = 1500;
+  const PRE_1960_DECADE_END = 1959;
+  const PRE_1960_DECADE_LABEL = 'pre-1960';
   const PRESENT_ONLY_SOURCE_MATCHERS = [/\binaturalist\b/i, /\bherbarium-?gbif\b/i, /\bgbif\b/i, /\binat\b/i];
   const DECADE_STARTS = [];
-  for (let year = MIN_DECADE_START; year <= MAX_DECADE_START; year += 10) {
+  DECADE_STARTS.push(PRE_1960_DECADE_START);
+  for (let year = Math.max(1960, MIN_DECADE_START); year <= MAX_DECADE_START; year += 10) {
     DECADE_STARTS.push(year);
   }
 
@@ -52,7 +58,7 @@
 
   window.portalFilters = window.portalFilters || {
     presenceMode: 'both',
-    decadeStart: MIN_DECADE_START,
+    decadeStart: DEFAULT_FILTER_DECADE_START,
     decadeEnd: MAX_DECADE_START,
     selectedPhenophases: [],
     geoBounds: null,
@@ -65,7 +71,7 @@
     const legacyStart = Number.isInteger(portalFilters.minYear)
       ? portalFilters.minYear
       : Number(String(portalFilters.dateStart || '').slice(0, 4));
-    portalFilters.decadeStart = Number.isFinite(legacyStart) ? Math.floor(legacyStart / 10) * 10 : MIN_DECADE_START;
+    portalFilters.decadeStart = Number.isFinite(legacyStart) ? Math.floor(legacyStart / 10) * 10 : DEFAULT_FILTER_DECADE_START;
   }
   if (!Number.isInteger(portalFilters.decadeEnd)) {
     const legacyEnd = Number.isInteger(portalFilters.maxYear)
@@ -95,6 +101,9 @@
   let maxDecadeCount = 0;
   let appliedFilterState = null;
   let filtersDirty = false;
+  let autoApplyTimer = null;
+  let autoApplyInFlight = false;
+  const AUTO_APPLY_DELAY_MS = 350;
 
   // -----------------------
   // Helpers
@@ -117,6 +126,10 @@
     return String(v || '').trim().toLowerCase();
   }
 
+  function isPre1960DecadeStart(decadeStart) {
+    return Number(decadeStart) === PRE_1960_DECADE_START;
+  }
+
   function cloneSelectedFacetsState(source) {
     const clone = {};
     Object.entries(source || {}).forEach(([field, values]) => {
@@ -132,7 +145,7 @@
     const bounds = normalizeGeoBounds(source?.geoBounds);
     return {
       presenceMode: String(source?.presenceMode || 'both').toLowerCase(),
-      decadeStart: clampDecadeStart(source?.decadeStart, MIN_DECADE_START),
+      decadeStart: clampDecadeStart(source?.decadeStart, DEFAULT_FILTER_DECADE_START),
       decadeEnd: clampDecadeStart(source?.decadeEnd, MAX_DECADE_START),
       selectedPhenophases: toArray(source?.selectedPhenophases)
         .map((value) => normalizeLower(value))
@@ -177,11 +190,11 @@
     const resetButton = document.getElementById('resetDraftFiltersButton');
 
     if (message) {
-      message.textContent = filtersDirty
-        ? 'You have unapplied filter changes.'
-        : 'Filters are up to date.';
-      message.classList.toggle('is-dirty', filtersDirty);
-      message.classList.toggle('is-clean', !filtersDirty);
+      message.textContent = autoApplyInFlight
+        ? 'Updating filters...'
+        : (filtersDirty ? 'Updating filters shortly...' : 'Filters update automatically.');
+      message.classList.toggle('is-dirty', filtersDirty || autoApplyInFlight);
+      message.classList.toggle('is-clean', !filtersDirty && !autoApplyInFlight);
     }
 
     if (applyButton) applyButton.disabled = !filtersDirty;
@@ -231,15 +244,35 @@
     if (typeof window.currentPage !== 'undefined') window.currentPage = 1;
   }
 
-  function markFiltersPending() {
+  function scheduleAutoApply(delayMs = AUTO_APPLY_DELAY_MS) {
+    if (autoApplyTimer) {
+      window.clearTimeout(autoApplyTimer);
+      autoApplyTimer = null;
+    }
+    autoApplyTimer = window.setTimeout(function () {
+      autoApplyTimer = null;
+      applyPendingFilters({ auto: true });
+    }, Math.max(0, delayMs));
+  }
+
+  function markFiltersPending(options = {}) {
     recomputeFilterDirtyState();
     renderSelectedFacets();
     updateQuerySummary();
+    if (filtersDirty) {
+      scheduleAutoApply(options.delayMs);
+    }
   }
 
-  function applyPendingFilters() {
+  function applyPendingFilters(_options = {}) {
+    if (autoApplyTimer) {
+      window.clearTimeout(autoApplyTimer);
+      autoApplyTimer = null;
+    }
     resetPaging();
     updateQueryWithSelectedFacets();
+    autoApplyInFlight = true;
+    refreshFilterApplyUi();
     captureAppliedFilterState();
 
     if (typeof window.markMapNeedsRender === 'function') {
@@ -248,6 +281,18 @@
 
     const activeTab = String(window.currentMainTab || 'stats').toLowerCase();
     if (activeTab === 'table') {
+      if (typeof window.fetchFacetData === 'function') {
+        window.fetchFacetData({
+          onSuccess: function () {
+            autoApplyInFlight = false;
+            refreshFilterApplyUi();
+          },
+          onError: function () {
+            autoApplyInFlight = false;
+            refreshFilterApplyUi();
+          },
+        });
+      }
       if (typeof window.fetchResults === 'function') {
         window.fetchResults();
       }
@@ -258,14 +303,24 @@
     }
 
     if (typeof window.fetchFacetData === 'function') {
-      window.fetchFacetData();
+      window.fetchFacetData({
+        onSuccess: function () {
+          autoApplyInFlight = false;
+          refreshFilterApplyUi();
+        },
+        onError: function () {
+          autoApplyInFlight = false;
+          refreshFilterApplyUi();
+        },
+      });
+    } else {
+      autoApplyInFlight = false;
+      refreshFilterApplyUi();
     }
 
     if (activeTab === 'stats') {
-      if (typeof window.showInitialStatsView === 'function') {
-        window.showInitialStatsView();
-      } else if (typeof window.fetchStatsData === 'function') {
-        window.fetchStatsData();
+      if (typeof window.markStatsNeedsRefresh === 'function') {
+        window.markStatsNeedsRefresh();
       }
       return;
     }
@@ -279,10 +334,12 @@
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
     const decade = Math.floor(n / 10) * 10;
+    if (decade < 1960) return PRE_1960_DECADE_START;
     return Math.max(MIN_DECADE_START, Math.min(MAX_DECADE_START, decade));
   }
 
   function formatDecadeLabel(decadeStart) {
+    if (isPre1960DecadeStart(decadeStart)) return PRE_1960_DECADE_LABEL;
     return `${decadeStart}s`;
   }
 
@@ -297,7 +354,7 @@
   }
 
   function getDecadeRangeFromState() {
-    let decadeStart = clampDecadeStart(portalFilters.decadeStart, MIN_DECADE_START);
+    let decadeStart = clampDecadeStart(portalFilters.decadeStart, DEFAULT_FILTER_DECADE_START);
     let decadeEnd = clampDecadeStart(portalFilters.decadeEnd, MAX_DECADE_START);
     if (decadeStart > decadeEnd) [decadeStart, decadeEnd] = [decadeEnd, decadeStart];
     portalFilters.decadeStart = decadeStart;
@@ -308,13 +365,13 @@
       decadeStartIndex: getDecadeIndex(decadeStart),
       decadeEndIndex: getDecadeIndex(decadeEnd),
       yearStart: decadeStart,
-      yearEnd: decadeEnd + 9,
+      yearEnd: isPre1960DecadeStart(decadeEnd) ? PRE_1960_DECADE_END : decadeEnd + 9,
     };
   }
 
   function isFullDecadeRange() {
     const r = getDecadeRangeFromState();
-    return r.decadeStart <= MIN_DECADE_START && r.decadeEnd >= MAX_DECADE_START;
+    return r.decadeStart === PRE_1960_DECADE_START && r.decadeEnd >= MAX_DECADE_START;
   }
 
   function setArrayParams(params, key, values) {
@@ -420,7 +477,7 @@
       if (!raw) return null;
       const value = Number(raw);
       if (!Number.isFinite(value) || value === 0) return null;
-      return clampDecadeStart(value, key === 'decadeEnd' ? MAX_DECADE_START : MIN_DECADE_START);
+      return clampDecadeStart(value, key === 'decadeEnd' ? MAX_DECADE_START : DEFAULT_FILTER_DECADE_START);
     }
 
     portalFilters.selectedPhenophases = phenophases;
@@ -702,8 +759,13 @@
 
   function buildDateRangeClause() {
     const selection = getDecadeRangeFromState();
-    if (selection.decadeStart <= MIN_DECADE_START && selection.decadeEnd >= MAX_DECADE_START) return null;
-    return { range: { decadeStart: { gte: selection.decadeStart, lte: selection.decadeEnd } } };
+    const range = { gte: selection.decadeStart };
+    if (isPre1960DecadeStart(selection.decadeStart) && isPre1960DecadeStart(selection.decadeEnd)) {
+      range.lte = PRE_1960_DECADE_END;
+      return { range: { decadeStart: range } };
+    }
+    if (selection.decadeEnd < MAX_DECADE_START) range.lte = selection.decadeEnd;
+    return { range: { decadeStart: range } };
   }
 
   function buildPresenceClause() {
@@ -850,6 +912,9 @@
   window.initializePortalFiltersFromUrl = initializePortalFiltersFromUrl;
   window.applyPendingFilters = applyPendingFilters;
   window.markFiltersPending = markFiltersPending;
+  window.flushPendingFilters = function flushPendingFilters() {
+    if (filtersDirty || autoApplyTimer) applyPendingFilters();
+  };
   window.captureAppliedFilterState = captureAppliedFilterState;
   window.hasPendingFilterChanges = function hasPendingFilterChanges() {
     return !!filtersDirty;
@@ -953,8 +1018,13 @@
     const buckets = aggregations?.decade_4?.decades?.buckets || aggregations?.decade_4?.buckets || [];
     buckets.forEach((bucket) => {
       const decadeStart = Math.floor(Number(bucket?.key) / 10) * 10;
+      const count = bucket?.doc_count || 0;
+      if (decadeStart < 1960) {
+        decadeCountsByStart.set(PRE_1960_DECADE_START, (decadeCountsByStart.get(PRE_1960_DECADE_START) || 0) + count);
+        return;
+      }
       if (!decadeCountsByStart.has(decadeStart)) return;
-      decadeCountsByStart.set(decadeStart, bucket?.doc_count || 0);
+      decadeCountsByStart.set(decadeStart, count);
     });
 
     maxDecadeCount = Math.max(0, ...Array.from(decadeCountsByStart.values()));
@@ -1039,7 +1109,7 @@
   }
 
   function resetCustomFilters() {
-    portalFilters.decadeStart = MIN_DECADE_START;
+    portalFilters.decadeStart = DEFAULT_FILTER_DECADE_START;
     portalFilters.decadeEnd = MAX_DECADE_START;
     portalFilters.presenceMode = 'both';
     portalFilters.selectedPhenophases = [];
@@ -1168,7 +1238,11 @@
     $setGeoOnMap.on('click', function () {
       $('#showMap').trigger('click');
 
-      window.setTimeout(function () {
+      const mapReady = typeof window.ensurePhenobaseMapLoaded === 'function'
+        ? window.ensurePhenobaseMapLoaded()
+        : Promise.resolve();
+
+      mapReady.then(function () {
         if (typeof window.startBoundingBoxSelection !== 'function') {
           return;
         }
@@ -1181,7 +1255,9 @@
           },
           onCancel: function () {},
         });
-      }, 180);
+      }).catch(function (error) {
+        console.error('Failed to load map before bounding-box selection:', error);
+      });
     });
 
     $applyFilters.on('click', function () {
@@ -1305,7 +1381,7 @@
 
       if (customType) {
         if (customType === 'year-range' || customType === 'date-range') {
-          portalFilters.decadeStart = MIN_DECADE_START;
+          portalFilters.decadeStart = DEFAULT_FILTER_DECADE_START;
           portalFilters.decadeEnd = MAX_DECADE_START;
         } else if (customType === 'presence-mode') {
           portalFilters.presenceMode = presenceModeLocked ? 'present' : 'both';
@@ -1443,7 +1519,7 @@
   }
 
   // -----------------------
-  // Main entry from fetchResults success
+  // Main entry from facet-data success
   // -----------------------
   function renderFacets(aggregations) {
     selectedFacets = window.selectedFacets || {};

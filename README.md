@@ -94,8 +94,8 @@ Each filter title has an inline `i` help icon that opens a small popover.
 ### Decade Range
 
 - Two-thumb decade slider built with jQuery UI
-- Uses discrete decade bins such as `1950s`, `1960s`, `1970s`
-- Default state is the full available decade range
+- Uses discrete decade bins from the `1500s` through the latest configured decade
+- Default state starts at the `1970s` decade and extends through the latest configured decade
 - Supports single-decade filtering by placing both thumbs on the same decade
 - Displays:
   - selected decade range text
@@ -273,7 +273,7 @@ Example workflow:
 Optional environment overrides:
 
 ```bash
-MAX_DECADE=2030 ./scripts/build-global-stats-snapshot.sh
+MIN_DECADE=1970 MAX_DECADE=2030 ./scripts/build-global-stats-snapshot.sh
 OUTPUT_PATH=app/global-stats-snapshot.json ./scripts/build-global-stats-snapshot.sh
 API_URL="https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=0&from=0" ./scripts/build-global-stats-snapshot.sh
 ```
@@ -287,7 +287,13 @@ cat > /tmp/phenobase-global-stats-request.json <<'JSON'
 {
   "size": 0,
   "track_total_hits": false,
-  "query": { "match_all": {} },
+  "query": {
+    "range": {
+      "decadeStart": {
+        "gte": 1970
+      }
+    }
+  },
   "aggs": {
     "datasource_0": { "terms": { "field": "dataSource", "size": 10 } },
     "decadeDistribution_1": {
@@ -295,7 +301,7 @@ cat > /tmp/phenobase-global-stats-request.json <<'JSON'
         "field": "decadeStart",
         "interval": 10,
         "min_doc_count": 0,
-        "extended_bounds": { "min": 1800, "max": 2020 }
+        "extended_bounds": { "min": 1970, "max": 2020 }
       }
     },
     "family_2": { "terms": { "field": "family", "size": 50 } },
@@ -340,6 +346,7 @@ curl -s \
 Notes:
 
 - Update the histogram `extended_bounds.max` value if your indexed maximum decade changes.
+- The default landing snapshot intentionally starts at `MIN_DECADE=1970`; override `MIN_DECADE` only if the default UI range changes.
 - Keep the snapshot in source control if you want static hosting to serve it directly.
 - `Refresh Stats` in the UI still requests live data; the pre-rendered file only affects the default unfiltered landing view.
 
@@ -361,7 +368,7 @@ After inserting or updating records in the datastore, update these frontend-faci
    If the new load introduces a later indexed decade, regenerate with a higher bound, for example:
 
    ```bash
-   MAX_DECADE=2030 ./scripts/build-global-stats-snapshot.sh
+   MIN_DECADE=1970 MAX_DECADE=2030 ./scripts/build-global-stats-snapshot.sh
    ```
 
 4. Validate the JSON files before commit.

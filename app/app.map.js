@@ -1,5 +1,6 @@
 // Leaflet init & base layers
 var map = L.map('map').setView([0, 0], 2);
+window.phenobaseLeafletMap = map;
 const baseLayers = {
   "Regular": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }),
   "Topo": L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenTopoMap contributors' }),

@@ -2,6 +2,31 @@
   "project": "Phenobase",
   "entries": [
     {
+      "datasetVersion": "2026.05.18",
+      "publishedAt": "2026-05-18",
+      "harvestedAt": "2026-05-18",
+      "loadedAt": "2026-05-18",
+      "title": "May 2026 Multi-source Harvest and Reload",
+      "summary": "Harvested and loaded refreshed human-observation and herbarium-derived sources on May 18, 2026, with datasource-specific PPO mappings and loader transforms.",
+      "methodology": [
+        "Harvested source data and loaded the refreshed datasets into the Phenobase index on May 18, 2026.",
+        "Used the current ontology-derived traits.csv as the canonical source for trait_urn-to-trait resolution.",
+        "Validated datasource-specific mappings and transform files before loading through the Phenobase loader.",
+        "Added taxon-search support in the loader so records can carry a backend-friendly search field for family, genus, and scientific-name lookup."
+      ],
+      "changes": [
+        "USA-NPN / NEON: converted the NPN fetch-and-transform workflow from Node to Python, refreshed mappings, and updated the phenophase fetcher to emit both present and absent status mappings where available.",
+        "PhenoObs: added the PhenoObs preparation workflow and mapping table, normalizing botanic-garden observations into loader-ready in-situ records with present/absent PPO trait mappings for vegetative growth, young leaves, flowers, ripe fruits, and senescence.",
+        "Budburst: added Budburst harvesting support, authentication-aware API fetching, plant-group/phenophase PPO mappings, and loader-ready output for leaf, flower, pollen, and fruit phenophases.",
+        "SeasonWatch India: added DwC-A harvesting support from the GBIF-hosted archive, value normalization for none/few/many observations, and PPO mappings for leaves, flowers, and fruits.",
+        "Herbarium: added an ingest transform that normalizes datasource naming, null handling, coordinates, dates, coordinate uncertainty, annotation method, and flower/fruit trait labels for herbarium inference records."
+      ],
+      "notes": [
+        "The existing iNaturalist PhenoVision machine-annotation release remains documented separately as the March 23, 2026 release.",
+        "The May 18 data work is reflected in the phenobase_data version2 branch commits and README reload synopsis."
+      ]
+    },
+    {
       "datasetVersion": "2026.03.23",
       "publishedAt": "2026-03-23",
       "recordCount": 71208823,

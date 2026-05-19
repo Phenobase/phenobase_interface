@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_PATH="${OUTPUT_PATH:-$ROOT_DIR/app/global-stats-snapshot.json}"
 API_URL="${API_URL:-https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=0&from=0}"
-MIN_DECADE="${MIN_DECADE:-1800}"
+MIN_DECADE="${MIN_DECADE:-1970}"
 MAX_DECADE="${MAX_DECADE:-2020}"
 
 TMP_REQUEST="$(mktemp)"
@@ -16,7 +16,13 @@ cat > "$TMP_REQUEST" <<JSON
 {
   "size": 0,
   "track_total_hits": false,
-  "query": { "match_all": {} },
+  "query": {
+    "range": {
+      "decadeStart": {
+        "gte": ${MIN_DECADE}
+      }
+    }
+  },
   "aggs": {
     "datasource_0": { "terms": { "field": "dataSource", "size": 10 } },
     "decadeDistribution_1": {

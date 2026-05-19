@@ -6,11 +6,25 @@ let pageSize = 15;
 var apiUrl = `https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=${pageSize}&from=0`;
 var queryStringRootURL = "https://biscicol.org/phenobase/api/v1/download/_search?q=";
 var downloadLink = "";
+const TABLE_SOURCE_FIELDS = [
+  "annotationID",
+  "dataSource",
+  "scientificName",
+  "year",
+  "dayOfYear",
+  "family",
+  "genus",
+  "trait",
+  "verbatimTrait",
+  "observedMetadataUrl",
+];
 const defaultTimeConfig = window.phenobaseTimeConfig || {};
-const DEFAULT_MIN_YEAR = Number.isFinite(Number(defaultTimeConfig.minYear)) ? Math.round(Number(defaultTimeConfig.minYear)) : 1800;
+const DEFAULT_MIN_YEAR = Number.isFinite(Number(defaultTimeConfig.minYear)) ? Math.round(Number(defaultTimeConfig.minYear)) : 1970;
 const DEFAULT_MAX_YEAR = Number.isFinite(Number(defaultTimeConfig.maxYear)) ? Math.round(Number(defaultTimeConfig.maxYear)) : new Date().getFullYear();
 const DEFAULT_MIN_DECADE = Math.floor(DEFAULT_MIN_YEAR / 10) * 10;
 const DEFAULT_MAX_DECADE = Math.floor(DEFAULT_MAX_YEAR / 10) * 10;
+window.DEFAULT_MIN_DECADE = DEFAULT_MIN_DECADE;
+window.DEFAULT_MAX_DECADE = DEFAULT_MAX_DECADE;
 
 // Hidden mapped trait
 const HIDDEN_TRAIT = 'plant structure present';
@@ -191,6 +205,12 @@ let loaderProgressTimer = null;
 let loaderStartedAt = 0;
 let loaderStageBaseProgress = 0;
 let loaderHideTimer = null;
+let detailsModalRequestId = 0;
+let activeTableRequest = null;
+let tableRequestId = 0;
+let activeFacetRequest = null;
+let facetRequestId = 0;
+const tableTotalCache = new Map();
 
 function updateLoaderProgress(stageText, progressPercent) {
   const safePercent = Math.max(0, Math.min(100, Math.round(progressPercent || 0)));
@@ -244,6 +264,37 @@ function hideLoader() {
   $("#loader").css("display", "none").attr("aria-hidden", "true");
   $(".facet-link").css("pointer-events", "auto");
 }
+function loadScriptOnce(src, globalTest) {
+  if (typeof globalTest === "function" && globalTest()) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-src-once="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.srcOnce = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function ensurePhenobaseMapLoaded() {
+  if (window.phenobaseMapLoadPromise) return window.phenobaseMapLoadPromise;
+
+  window.phenobaseMapLoadPromise = loadScriptOnce("https://unpkg.com/leaflet/dist/leaflet.js", () => !!window.L)
+    .then(() => loadScriptOnce("https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js", () => !!window.L?.markerClusterGroup))
+    .then(() => loadScriptOnce("app.map.js", () => !!window.phenobaseLeafletMap));
+
+  return window.phenobaseMapLoadPromise;
+}
+window.ensurePhenobaseMapLoaded = ensurePhenobaseMapLoaded;
 function setResultsHeadingText(text) {
   const el = document.getElementById('resultsHeading');
   if (!el) return;
@@ -258,6 +309,12 @@ function getCurrentQuerySignature() {
 }
 function updateResultsHeading(showingResults, totalResults) {
   setResultsHeadingText(`Showing ${showingResults} of ${totalResults.toLocaleString()} total possible results`);
+}
+function getTotalHitsValue(response) {
+  const total = response?.hits?.total;
+  if (typeof total === 'number') return total;
+  if (total && typeof total.value === 'number') return total.value;
+  return null;
 }
 function calculateTotalFromFacets(aggregations) {
   let total = 0;
@@ -317,9 +374,21 @@ function syncScientificNameDraftFromInput() {
   scientificNameFilter = scientificName ? buildScientificSearchFilter(scientificName) : null;
   window.scientificNameFilter = scientificNameFilter;
 }
+function buildTableRequestBody() {
+  const signature = getCurrentQuerySignature();
+  return {
+    query: requestData.query || { match_all: {} },
+    _source: TABLE_SOURCE_FIELDS,
+    track_total_hits: !tableTotalCache.has(signature),
+  };
+}
 
 // Fetch & render
 function fetchResults() {
+  const requestId = ++tableRequestId;
+  if (activeTableRequest && typeof activeTableRequest.abort === "function") {
+    activeTableRequest.abort();
+  }
   showLoader('Submitting query...', 14);
 
   // NEW: adjust page size to fill the screen when the table is visible
@@ -329,22 +398,28 @@ function fetchResults() {
 
   const offset = (currentPage - 1) * pageSize;
   const apiWithPagination = `${apiUrl.split('?')[0]}?size=${pageSize}&from=${offset}`;
-  $.ajax({
+  activeTableRequest = $.ajax({
     url: apiWithPagination, method: "POST", contentType: "application/json",
     beforeSend: function () {
       setLoaderStage('Waiting for records...', 26);
     },
-    data: JSON.stringify(requestData), dataType: "json",
+    data: JSON.stringify(buildTableRequestBody()), dataType: "json",
     success: function (response) {
+      if (requestId !== tableRequestId) return;
+      activeTableRequest = null;
       setLoaderStage('Rendering results...', 96);
       if (response?.hits?.hits) {
         const results = response.hits.hits;
-        const totalResults = calculateTotalFromFacets(response.aggregations);
-        const startResult = offset + 1;
+        const querySignature = getCurrentQuerySignature();
+        const responseTotal = getTotalHitsValue(response);
+        if (typeof responseTotal === 'number') {
+          tableTotalCache.set(querySignature, responseTotal);
+        }
+        const totalResults = tableTotalCache.get(querySignature) ?? results.length;
+        const startResult = totalResults ? offset + 1 : 0;
         const endResult   = Math.min(offset + results.length, totalResults);
-        window.lastResultsLoadedSignature = getCurrentQuerySignature();
+        window.lastResultsLoadedSignature = querySignature;
         renderResults(results);
-        renderFacets(response.aggregations);
         renderSelectedFacets();
         updateDownloadLink();
         renderPagination(totalResults);
@@ -360,11 +435,21 @@ function fetchResults() {
         alert("Unexpected response structure.");
       }
     },
-    error: function (error) { hideLoader(); console.error("Error fetching data:", error); }
+    error: function (error) {
+      if (error?.statusText === "abort") return;
+      if (requestId !== tableRequestId) return;
+      activeTableRequest = null;
+      hideLoader();
+      console.error("Error fetching data:", error);
+    }
   });
 }
 
 function fetchFacetData(options = {}) {
+  const requestId = ++facetRequestId;
+  if (activeFacetRequest && typeof activeFacetRequest.abort === "function") {
+    activeFacetRequest.abort();
+  }
   const onSuccess = typeof options.onSuccess === 'function' ? options.onSuccess : null;
   const onError = typeof options.onError === 'function' ? options.onError : null;
   const facetApiUrl = `${apiUrl.split('?')[0]}?size=0&from=0`;
@@ -372,15 +457,18 @@ function fetchFacetData(options = {}) {
     ...requestData,
     size: 0,
     from: 0,
+    track_total_hits: false,
   };
 
-  return $.ajax({
+  activeFacetRequest = $.ajax({
     url: facetApiUrl,
     method: "POST",
     contentType: "application/json",
     data: JSON.stringify(requestBody),
     dataType: "json",
     success(response) {
+      if (requestId !== facetRequestId) return;
+      activeFacetRequest = null;
       if (response?.aggregations) {
         renderFacets(response.aggregations);
         if (typeof onSuccess === 'function') onSuccess(response);
@@ -390,10 +478,14 @@ function fetchFacetData(options = {}) {
       if (typeof onError === 'function') onError(response);
     },
     error(error) {
+      if (error?.statusText === "abort") return;
+      if (requestId !== facetRequestId) return;
+      activeFacetRequest = null;
       console.error("Error fetching facet data:", error);
       if (typeof onError === 'function') onError(error);
     }
   });
+  return activeFacetRequest;
 }
 
 function renderResults(results) {
@@ -407,35 +499,45 @@ function renderResults(results) {
   table.prepend(thead);
 
   results.forEach(function (doc) {
-    var row = `<tr data-source='${JSON.stringify(doc._source)}'>
-      <td class="view-details">
-        <i class="fa fa-search view-icon" style="cursor: pointer;" title="View Details" data-source='${JSON.stringify(doc._source)}'></i>
-      </td>
-      <td>${doc._source.dataSource || ''}</td>
-      <td>${doc._source.scientificName || ''}</td>
-      <td>${doc._source.year || ''}</td>
-      <td>${doc._source.dayOfYear || ''}</td>
-      <td>${doc._source.family || ''}</td>
-      <td>${doc._source.genus || ''}</td>
-      <td>${doc._source.trait || ''}</td>
-      <td>${doc._source.verbatimTrait || ''}</td>
-      <td>${
-        (() => {
-          const urlFromDoc = String(doc._source?.observedMetadataUrl || '').trim();
-          if (urlFromDoc) return `<a href="${urlFromDoc}" target="_blank" rel="noopener noreferrer">Observation Metadata</a>`;
-          const rawId = doc._source?.annotationID;
-          const npnId = (typeof rawId === 'string' && rawId.startsWith('npn:')) ? rawId.slice(4) : null;
-          if (npnId) {
-            const npnUrl = `https://services.usanpn.org/npn_portal/observations/getObservationById.json?request_src=PPO&observation_id=${encodeURIComponent(npnId)}&pretty=1`;
-            return `<a href="${npnUrl}" target="_blank" rel="noopener noreferrer">Observation Metadata</a>`;
-          }
-          return 'Observation Metadata Unavailable';
-        })()
-      }</td></tr>`;
-    tableBody.append(row);
+    const source = doc._source || {};
+    const $row = $("<tr>");
+    const $detailsCell = $('<td class="view-details">');
+    const $detailsIcon = $('<i class="fa fa-search view-icon" style="cursor: pointer;" title="View Details"></i>');
+    $detailsIcon.data("source", source);
+    $detailsIcon.data("docId", doc._id || source.annotationID || "");
+    $detailsCell.append($detailsIcon);
+    $row.append($detailsCell);
+
+    [
+      source.dataSource,
+      source.scientificName,
+      source.year,
+      source.dayOfYear,
+      source.family,
+      source.genus,
+      source.trait,
+      source.verbatimTrait,
+    ].forEach((value) => {
+      $("<td>").text(value || "").appendTo($row);
+    });
+
+    const $sourceCell = $("<td>");
+    const metadataUrl = observationMetadataUrlFromSource(source);
+    if (metadataUrl) {
+      $("<a>")
+        .attr({ href: metadataUrl, target: "_blank", rel: "noopener noreferrer" })
+        .text("Observation Metadata")
+        .appendTo($sourceCell);
+    } else {
+      $sourceCell.text("Observation Metadata Unavailable");
+    }
+    $row.append($sourceCell);
+    tableBody.append($row);
   });
 
-  $(".view-icon").click(function () { showDetailsModal($(this).data("source")); });
+  $(".view-icon").click(function () {
+    showDetailsModal($(this).data("source"), $(this).data("docId"));
+  });
 }
 
 function renderPagination(totalResults) {
@@ -455,20 +557,75 @@ window.fetchFacetData = fetchFacetData;
 window.setResultsHeadingText = setResultsHeadingText;
 
 // Modal
-function showDetailsModal(sourceData) {
+function observationMetadataUrlFromSource(sourceData) {
+  const urlFromDoc = String(sourceData?.observedMetadataUrl || '').trim();
+  if (urlFromDoc) return urlFromDoc;
+  const rawId = sourceData?.annotationID;
+  const npnId = (typeof rawId === 'string' && rawId.startsWith('npn:')) ? rawId.slice(4) : null;
+  if (npnId) {
+    return `https://services.usanpn.org/npn_portal/observations/getObservationById.json?request_src=PPO&observation_id=${encodeURIComponent(npnId)}&pretty=1`;
+  }
+  return '';
+}
+function fetchRecordDetailsById(docId) {
+  if (!docId) return $.Deferred().reject().promise();
+  const requestBody = {
+    query: { ids: { values: [String(docId)] } },
+    size: 1,
+  };
+  return $.ajax({
+    url: `${apiUrl.split('?')[0]}?size=1&from=0`,
+    method: "POST",
+    contentType: "application/json",
+    data: JSON.stringify(requestBody),
+    dataType: "json",
+  }).then((response) => response?.hits?.hits?.[0]?._source || null);
+}
+function renderDetailsModalContent(sourceData, isPartial) {
   var modal = $("#detailsModal"); var modalBody = $("#modalBody"); modalBody.empty();
   var content = $(`<div style="display:flex; flex-wrap:wrap; gap:20px;"><div style="flex:1;"></div></div>`);
   modalBody.append(content);
+  if (isPartial) {
+    content.find('div:last-child').append($("<p>").addClass("text-muted").text("Showing table fields while full record details load..."));
+  }
   Object.entries(sourceData || {}).forEach(([k,v]) => {
     if (k === 'observedImageUrl' || k === 'observedImageGuid') {
-      content.find('div:last-child').append(`<p><strong>${k}:</strong> <a href="${sourceData.observedImageUrl}" target="_blank">${v}</a></p>`);
+      const imageUrl = String(sourceData.observedImageUrl || '').trim();
+      const $p = $("<p>");
+      $("<strong>").text(`${k}:`).appendTo($p);
+      $p.append(" ");
+      if (imageUrl) {
+        $("<a>").attr({ href: imageUrl, target: "_blank", rel: "noopener noreferrer" }).text(v).appendTo($p);
+      } else {
+        $p.append(document.createTextNode(String(v || "")));
+      }
+      content.find('div:last-child').append($p);
     } else if (k === 'dataset_id') {
 	  // do nothing
-	} else { content.find('div:last-child').append(`<p><strong>${k}:</strong> ${v}</p>`); }
+	} else {
+      const $p = $("<p>");
+      $("<strong>").text(`${k}:`).appendTo($p);
+      $p.append(" ");
+      $p.append(document.createTextNode(String(v ?? "")));
+      content.find('div:last-child').append($p);
+    }
   });
   modal.css("display", "flex");
 }
-$("#closeModal").click(function () { $("#detailsModal").hide(); });
+function showDetailsModal(sourceData, docId) {
+  const requestId = ++detailsModalRequestId;
+  renderDetailsModalContent(sourceData, !!docId);
+  if (!docId) return;
+  fetchRecordDetailsById(docId)
+    .then((fullSourceData) => {
+      if (requestId !== detailsModalRequestId || $("#detailsModal").css("display") === "none") return;
+      if (fullSourceData) renderDetailsModalContent(fullSourceData, false);
+    })
+    .catch((error) => {
+      console.warn("Failed to load full record details:", error);
+    });
+}
+$("#closeModal").click(function () { detailsModalRequestId += 1; $("#detailsModal").hide(); });
 
 // Query builder with AND/OR per field.
 // (Option-B trait OR groups will append their own OR block after this runs.)
@@ -520,7 +677,7 @@ $(document).ready(function () {
   $("#scientificNameSearch").on("input", function () {
     syncScientificNameDraftFromInput();
     if (typeof window.markFiltersPending === 'function') {
-      window.markFiltersPending();
+      window.markFiltersPending({ delayMs: 500 });
     }
   });
 
@@ -533,6 +690,9 @@ $(document).ready(function () {
     }
     setActiveMainTab('table');
     if (typeof window.hasPendingFilterChanges === 'function' && window.hasPendingFilterChanges()) {
+      if (typeof window.flushPendingFilters === 'function') {
+        window.flushPendingFilters();
+      }
       return;
     }
     if (window.lastResultsLoadedSignature === getCurrentQuerySignature()) {
@@ -543,12 +703,24 @@ $(document).ready(function () {
   });
   $("#showMap").click(function () {
     setActiveMainTab('map');
-    setTimeout(() => {
-      map.invalidateSize();
-      if (typeof window.markMapNeedsRender === 'function') {
-        window.markMapNeedsRender();
-      }
-    }, 100);
+    setResultsHeadingText('Loading map...');
+    ensurePhenobaseMapLoaded()
+      .then(() => {
+        window.setTimeout(() => {
+          const loadedMap = window.phenobaseLeafletMap;
+          if (loadedMap && typeof loadedMap.invalidateSize === 'function') {
+            loadedMap.invalidateSize();
+          }
+          if (typeof window.markMapNeedsRender === 'function') {
+            window.markMapNeedsRender();
+          }
+          setResultsHeadingText('Map results update on demand');
+        }, 100);
+      })
+      .catch((error) => {
+        console.error("Failed to load map assets:", error);
+        setResultsHeadingText('Map failed to load');
+      });
   });
   $("#showStats").click(function () {
     if (typeof window.cancelBoundingBoxSelection === 'function') {
@@ -559,6 +731,9 @@ $(document).ready(function () {
     }
     setActiveMainTab('stats');
     if (typeof window.hasPendingFilterChanges === 'function' && window.hasPendingFilterChanges()) {
+      if (typeof window.flushPendingFilters === 'function') {
+        window.flushPendingFilters();
+      }
       if (typeof window.syncStatsStatusVisibility === 'function') {
         window.syncStatsStatusVisibility();
       }

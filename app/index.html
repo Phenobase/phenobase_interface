@@ -7,16 +7,11 @@
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="styles.css"> <!-- Link to external CSS -->
-  <!-- Include Leaflet CSS and JS -->
+  <!-- Leaflet and MarkerCluster CSS. JavaScript loads only when the Map tab opens. -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-  <!-- Leaflet MarkerCluster CSS and JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  
-  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   
@@ -122,11 +117,9 @@
         </div>
 
         <div class="filter-apply-bar">
-          <div id="filterPendingMessage" class="filter-pending-message">Filters are up to date.</div>
+          <div id="filterPendingMessage" class="filter-pending-message">Filters update automatically.</div>
           <div class="filter-apply-actions">
-            <button id="applyFiltersButton" class="btn btn-primary btn-sm" type="button" disabled>Apply Filters</button>
             <button id="clearAllFiltersButton" class="btn btn-default btn-sm" type="button">Clear all</button>
-            <button id="resetDraftFiltersButton" class="btn btn-default btn-sm" type="button" disabled>Reset Draft</button>
           </div>
         </div>
 
@@ -251,11 +244,10 @@
   <!-- Load jQuery and jQuery UI -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
-<script src="app.core.js"></script>
-<script src="app.map.js"></script>
-<script src="app.stats.js"></script>
-<script src="app.traits.js"></script>
-<script src="app.facets.js"></script>
+  <script src="app.core.js"></script>
+  <script src="app.stats.js"></script>
+  <script src="app.traits.js"></script>
+  <script src="app.facets.js"></script>
 
 
 
