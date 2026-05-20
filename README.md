@@ -291,6 +291,17 @@ API_URL="https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=0&
 
 The repository also includes a GitHub Actions workflow at `.github/workflows/refresh-global-stats-snapshot.yml` that rebuilds and commits the snapshot once per day at 09:17 UTC. It can also be run manually from the Actions tab with `workflow_dispatch`.
 
+If you want to bump the remote cache without waiting for the daily workflow, make a small repository change by regenerating and pushing the snapshot:
+
+```bash
+./scripts/build-global-stats-snapshot.sh
+git add app/global-stats-snapshot.json
+git commit -m "Refresh global stats snapshot"
+git push
+```
+
+This is preferred over editing only the `generatedAt` timestamp because the snapshot data is refreshed from the backend, not just marked fresh.
+
 Reference: raw request shape used by the helper script:
 
 ```bash
