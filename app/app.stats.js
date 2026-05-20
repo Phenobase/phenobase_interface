@@ -673,6 +673,7 @@ function buildStatsBaseAggregations() {
 
 function buildStatsRequestData(statsMeta, options = {}) {
   const query = window.requestData?.query || { match_all: {} };
+  const decadeBounds = getStatsDecadeBounds();
   const summaryOnly = !!statsMeta?.summaryOnly;
   const includeMappedTraits = options.includeMappedTraits !== false;
   const includePhenophaseSummary = options.includePhenophaseSummary != null
