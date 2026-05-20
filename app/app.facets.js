@@ -18,6 +18,21 @@
   const PRE_1960_DECADE_START = 1500;
   const PRE_1960_DECADE_END = 1959;
   const PRE_1960_DECADE_LABEL = 'pre-1960';
+  const URL_FILTER_STATE_ENABLED = window.phenobaseEnableUrlFilterState === true;
+  const PORTAL_URL_PARAM_KEYS = [
+    'scientificName',
+    'decadeStart',
+    'decadeEnd',
+    'presenceMode',
+    'traitMode',
+    'dataSource',
+    'mappedTrait',
+    'phenophase',
+    'minLat',
+    'maxLat',
+    'minLon',
+    'maxLon',
+  ];
   const PRESENT_ONLY_SOURCE_MATCHERS = [/\binaturalist\b/i, /\bherbarium-?gbif\b/i, /\bgbif\b/i, /\binat\b/i];
   const DECADE_STARTS = [];
   DECADE_STARTS.push(PRE_1960_DECADE_START);
@@ -382,6 +397,25 @@
       .forEach((value) => params.append(key, value));
   }
 
+  function clearPortalStateUrlParams() {
+    if (!(window.history && window.history.replaceState)) return;
+
+    const params = new URLSearchParams(window.location.search);
+    let changed = false;
+
+    PORTAL_URL_PARAM_KEYS.forEach((key) => {
+      if (!params.has(key)) return;
+      params.delete(key);
+      changed = true;
+    });
+
+    if (!changed) return;
+
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }
+
   function fullEarthBounds() {
     return {
       minLat: -90,
@@ -401,6 +435,11 @@
   }
 
   function syncPortalStateToUrl() {
+    if (!URL_FILTER_STATE_ENABLED) {
+      clearPortalStateUrlParams();
+      return;
+    }
+
     if (!(window.history && window.history.replaceState)) return;
 
     const selection = getDecadeRangeFromState();
@@ -438,6 +477,12 @@
   }
 
   function initializePortalFiltersFromUrl() {
+    if (!URL_FILTER_STATE_ENABLED) {
+      clearPortalStateUrlParams();
+      getDecadeRangeFromState();
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const selectedFromUrl = {};
     const scientificName = String(params.get('scientificName') || '').trim();

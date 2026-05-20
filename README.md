@@ -101,9 +101,7 @@ Each filter title has an inline `i` help icon that opens a small popover.
   - selected decade range text
   - visible decade tick labels
   - tiny histogram bars showing counts per decade
-- URL state is synchronized with:
-  - `decadeStart`
-  - `decadeEnd`
+- Filter state is not written to the URL by default, so refreshing the browser returns to the native/default state instead of replaying stale query parameters.
 
 Internally the UI now queries the indexed `decadeStart` field instead of dynamically working from raw `year`.
 
@@ -135,6 +133,12 @@ Internally the UI now queries the indexed `decadeStart` field instead of dynamic
   - presence mode
   - phenophase / trait selections
   - bbox
+
+### URL Filter State
+
+- By default, filters operate entirely in page state and are not persisted into the browser URL
+- On load, known legacy filter params such as `dataSource`, `mappedTrait`, `decadeStart`, `decadeEnd`, and bbox coordinates are removed from the address bar and ignored
+- To re-enable shareable filter URLs for a custom deployment, set `window.phenobaseEnableUrlFilterState = true` before `app.facets.js` loads
 
 ### Download
 
