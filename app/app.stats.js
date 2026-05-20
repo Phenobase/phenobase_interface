@@ -21,6 +21,9 @@ const statsLoadState = {
 };
 const GLOBAL_STATS_SNAPSHOT_URL = String(window.phenobaseGlobalStatsSnapshotUrl || "global-stats-snapshot.json");
 const DATA_RELEASE_HISTORY_URL = String(window.phenobaseDataReleaseHistoryUrl || "data-release-history.json");
+const GLOBAL_STATS_SNAPSHOT_MAX_AGE_HOURS = Number.isFinite(Number(window.phenobaseGlobalStatsSnapshotMaxAgeHours))
+  ? Number(window.phenobaseGlobalStatsSnapshotMaxAgeHours)
+  : 24;
 const STATS_SIMPLE_PHASES = [
   { key: "unfolded true leaf", label: "Unfolded true leaf" },
   { key: "breaking vegetative bud", label: "Breaking vegetative bud" },
@@ -62,6 +65,16 @@ function formatStatsSnapshotTimestamp(value) {
   return date.toLocaleString();
 }
 
+function isFreshGlobalStatsSnapshot(snapshot) {
+  if (!Number.isFinite(GLOBAL_STATS_SNAPSHOT_MAX_AGE_HOURS) || GLOBAL_STATS_SNAPSHOT_MAX_AGE_HOURS <= 0) return true;
+  const generatedAt = snapshot?.generatedAt || snapshot?.cachedAt;
+  if (!generatedAt) return false;
+  const generatedTime = new Date(generatedAt).getTime();
+  if (Number.isNaN(generatedTime)) return false;
+  const maxAgeMs = GLOBAL_STATS_SNAPSHOT_MAX_AGE_HOURS * 60 * 60 * 1000;
+  return Date.now() - generatedTime <= maxAgeMs;
+}
+
 function formatReleaseDate(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -91,6 +104,33 @@ function clearDataReleaseHistorySection() {
   container.innerHTML = "";
 }
 
+function renderDataReleaseHistoryEmptyState(message) {
+  const container = getDataReleaseHistoryContainer();
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const wrap = document.createElement("section");
+  wrap.className = "release-history-wrap";
+
+  const title = document.createElement("h3");
+  title.className = "stats-section-title";
+  title.textContent = "Data Release History";
+  wrap.appendChild(title);
+
+  const intro = document.createElement("p");
+  intro.className = "stats-note";
+  intro.textContent = "This section is independent of the current stats filters and shows the latest published release notes for the dataset.";
+  wrap.appendChild(intro);
+
+  const empty = document.createElement("div");
+  empty.className = "stats-empty-state";
+  empty.textContent = message || "No data release history entries are available yet.";
+  wrap.appendChild(empty);
+
+  container.appendChild(wrap);
+}
+
 function snapshotHasCommonAggregations(snapshot) {
   return !!(
     snapshot?.aggregations?.datasource_0
@@ -102,6 +142,7 @@ function snapshotHasCommonAggregations(snapshot) {
 
 function isUsableGlobalStatsSnapshot(snapshot) {
   if (snapshot?.ready !== true) return false;
+  if (!isFreshGlobalStatsSnapshot(snapshot)) return false;
   if (!snapshotHasCommonAggregations(snapshot)) return false;
   if (snapshot?.summaryOnly) {
     return !!snapshot?.aggregations?.phenophasePresenceSummary_4;
@@ -177,7 +218,7 @@ function renderDataReleaseHistory(payload) {
 
   const entries = releaseHistoryEntriesSorted(payload);
   if (!entries.length) {
-    clearDataReleaseHistorySection();
+    renderDataReleaseHistoryEmptyState();
     return;
   }
 
@@ -243,14 +284,9 @@ function renderDataReleaseHistory(payload) {
 }
 
 async function refreshDataReleaseHistorySection() {
-  if (!isUnfilteredStatsQuery(currentStatsQuery())) {
-    clearDataReleaseHistorySection();
-    return;
-  }
-
   const payload = await getDataReleaseHistory();
   if (!payload) {
-    clearDataReleaseHistorySection();
+    renderDataReleaseHistoryEmptyState("Data release history could not be loaded.");
     return;
   }
 
@@ -299,6 +335,25 @@ function getStatsQuerySignature() {
   } catch (_error) {
     return String(Date.now());
   }
+}
+
+function getCachedStatsOverviewAggregations() {
+  const cached = window.lastFacetStatsAggregations;
+  const cachedSignature = window.lastFacetStatsSignature;
+  if (!cached || cachedSignature !== getStatsQuerySignature()) return null;
+  const decadeDistribution = cached?.decadeDistribution_1 || cached?.decade_4;
+  if (!cached?.datasource_0 || !decadeDistribution || !cached?.family_2 || !cached?.genus_3) return null;
+  return {
+    ...cached,
+    decadeDistribution_1: decadeDistribution,
+  };
+}
+
+function getCachedStatsDatasourceAggregation() {
+  const cached = window.lastFacetStatsAggregations;
+  const cachedSignature = window.lastFacetStatsSignature;
+  if (!cached || cachedSignature !== getStatsQuerySignature()) return null;
+  return cached?.datasource_0 || null;
 }
 
 function statsNormalizeLower(value) {
@@ -595,12 +650,10 @@ function getStatsDecadeBounds() {
   return { min: Math.min(min, max), max: Math.max(min, max) };
 }
 
-function buildStatsRequestData(statsMeta) {
-  const query = window.requestData?.query || { match_all: {} };
+function buildStatsBaseAggregations() {
   const decadeBounds = getStatsDecadeBounds();
-  const summaryOnly = !!statsMeta?.summaryOnly;
 
-  const aggs = {
+  return {
     datasource_0: { terms: { field: "dataSource", size: 10 } },
     decadeDistribution_1: {
       histogram: {
@@ -616,8 +669,19 @@ function buildStatsRequestData(statsMeta) {
     family_2: { terms: { field: "family", size: 50 } },
     genus_3: { terms: { field: "genus", size: 50 } },
   };
+}
 
-  if (summaryOnly) {
+function buildStatsRequestData(statsMeta, options = {}) {
+  const query = window.requestData?.query || { match_all: {} };
+  const summaryOnly = !!statsMeta?.summaryOnly;
+  const includeMappedTraits = options.includeMappedTraits !== false;
+  const includePhenophaseSummary = options.includePhenophaseSummary != null
+    ? !!options.includePhenophaseSummary
+    : summaryOnly;
+
+  const aggs = buildStatsBaseAggregations();
+
+  if (includePhenophaseSummary) {
     aggs.phenophasePresenceSummary_4 = {
       filters: {
         filters: STATS_SIMPLE_PHASES.reduce((filters, phase) => {
@@ -631,7 +695,9 @@ function buildStatsRequestData(statsMeta) {
         }, {}),
       },
     };
-  } else {
+  }
+
+  if (includeMappedTraits && !summaryOnly) {
     aggs.mappedTraitsByDecade_4 = {
       terms: statsMeta.terms,
       aggs: {
@@ -676,6 +742,53 @@ function buildStatsRequestData(statsMeta) {
   };
 }
 
+function buildStatsOverviewRequestData(statsMeta) {
+  return buildStatsRequestData(statsMeta, {
+    includeMappedTraits: false,
+    includePhenophaseSummary: !!statsMeta?.summaryOnly,
+  });
+}
+
+function buildStatsMappedTraitsRequestData(statsMeta) {
+  return buildStatsRequestData(statsMeta, {
+    includeMappedTraits: true,
+    includePhenophaseSummary: false,
+  });
+}
+
+function buildStatsSummaryOnlyNote(isGlobalSummary) {
+  return isGlobalSummary
+    ? "This lighter global summary shows high-level present and absent counts for the main simple phenophases. Detailed day-of-year trait charts are skipped here so the global overview renders faster."
+    : "This lighter filtered summary shows high-level present and absent counts for the main simple phenophases. Select a trait or simple phenophase to load day-of-year charts.";
+}
+
+async function runStatsAjaxRequest(requestBody, requestId) {
+  const request = $.ajax({
+    url: STATS_API_URL,
+    method: "POST",
+    contentType: "application/json",
+    data: JSON.stringify(requestBody),
+    dataType: "json",
+  });
+
+  statsLoadState.activeRequest = request;
+
+  try {
+    const response = await request;
+    if (requestId !== statsLoadState.requestId) return null;
+    return response;
+  } catch (error) {
+    if (error?.statusText === "abort") {
+      return null;
+    }
+    throw error;
+  } finally {
+    if (statsLoadState.activeRequest === request) {
+      statsLoadState.activeRequest = null;
+    }
+  }
+}
+
 function renderTable(id, headers, rows, title) {
   const container = document.getElementById(id);
   if (!container) return;
@@ -689,7 +802,12 @@ function renderTable(id, headers, rows, title) {
 
   const table = document.createElement("table");
   table.classList.add("table", "table-striped");
+  table.appendChild(buildStatsTableHead(headers));
+  table.appendChild(buildStatsTableBody(rows));
+  container.appendChild(table);
+}
 
+function buildStatsTableHead(headers) {
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
   headers.forEach((header) => {
@@ -698,8 +816,10 @@ function renderTable(id, headers, rows, title) {
     headerRow.appendChild(th);
   });
   thead.appendChild(headerRow);
-  table.appendChild(thead);
+  return thead;
+}
 
+function buildStatsTableBody(rows) {
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = document.createElement("tr");
@@ -710,8 +830,7 @@ function renderTable(id, headers, rows, title) {
     });
     tbody.appendChild(tr);
   });
-  table.appendChild(tbody);
-  container.appendChild(table);
+  return tbody;
 }
 
 function yieldStatsRender() {
@@ -742,8 +861,8 @@ function renderStatsLoadingState(summaryOnly) {
   renderStatsSectionLoading("decadeTable", "Decade Distribution", "Loading decade counts...");
   renderStatsSectionLoading(
     "mappedTraitsTable",
-    summaryOnly ? "Phenophase Presence Summary" : "Mapped Traits: Day of Year by Decade",
-    summaryOnly ? "Loading phenophase summary..." : "Loading selected trait charts..."
+    "Mapped Traits: Day of Year by Decade",
+    summaryOnly ? "Loading mapped trait summary..." : "Loading mapped trait charts..."
   );
   renderStatsSectionLoading("familyTable", "Family Distribution", "Loading family counts...");
   renderStatsSectionLoading("genusTable", "Genus Distribution", "Loading genus counts...");
@@ -1360,78 +1479,283 @@ function renderTraitDecadeCharts(aggregations) {
   container.appendChild(grid);
 }
 
-function renderGlobalPhenophaseSummary(aggregations) {
+function renderMappedTraitsSection(aggregations, options = {}) {
   const container = document.getElementById("mappedTraitsTable");
   if (!container) return;
+
   container.innerHTML = "";
-  const summaryNoteText = window.lastStatsMeta?.traitNote
-    || "This lighter summary shows high-level present and absent counts for the main simple phenophases. Detailed day-of-year trait charts are skipped until you select a trait or simple phenophase.";
 
-  const buckets = aggregations?.phenophasePresenceSummary_4?.buckets || {};
-  const rows = STATS_SIMPLE_PHASES.map((phase) => {
-    const present = Number(buckets?.[summaryAggNameForPhase(phase.key, "present")]?.doc_count || 0);
-    const absent = Number(buckets?.[summaryAggNameForPhase(phase.key, "absent")]?.doc_count || 0);
-    return {
-      label: phase.label,
-      present,
-      absent,
-      total: present + absent,
-    };
-  }).sort((a, b) => b.total - a.total);
+  const summaryOnly = !!options.summaryOnly;
+  const errorMessage = String(options.errorMessage || "").trim();
+  const title = document.createElement("h3");
+  title.className = "stats-section-title";
+  title.textContent = "Mapped Traits: Day of Year by Decade";
+  container.appendChild(title);
 
-  if (!rows.some((row) => row.total > 0)) {
+  const note = document.createElement("p");
+  note.className = "stats-note";
+  const selectedTraits = statsToArray(window.selectedFacets?.mappedTraits)
+    .filter(Boolean)
+    .filter((term) => statsNormalizeLower(term) !== STATS_HIDDEN_TRAIT);
+  const selectedPhenophases = statsGetSelectedPhenophaseTraitTerms();
+  const hasTraitSelection = selectedTraits.length > 0;
+  const hasPhenophaseSelection = selectedPhenophases.length > 0;
+  const traitNote = window.lastStatsMeta?.traitNote ? ` ${window.lastStatsMeta.traitNote}` : "";
+
+  if (errorMessage) {
+    note.textContent = errorMessage;
+    container.appendChild(note);
     const empty = document.createElement("div");
     empty.className = "stats-empty-state";
-    empty.textContent = "No phenophase summary is available for the current filters.";
+    empty.textContent = errorMessage;
     container.appendChild(empty);
     return;
   }
 
-  renderTable(
-    "mappedTraitsTable",
-    ["Phenophase", "Present", "Absent", "Total"],
-    rows.map((row) => [
+  if (summaryOnly) {
+    note.textContent = hasTraitSelection || hasPhenophaseSelection
+      ? "No mapped-trait charts are shown for the current filters. Select one or more traits in the sidebar, then refresh Stats, to see the day-of-year box plots. If you only use phenophase filters, this section shows a phenophase presence summary instead."
+      : "Select one or more traits in the sidebar, then refresh Stats, to see the mapped-trait day-of-year charts. When no traits are selected, this section shows a phenophase presence summary instead.";
+    container.appendChild(note);
+
+    const buckets = aggregations?.phenophasePresenceSummary_4?.buckets || {};
+    const rows = STATS_SIMPLE_PHASES.map((phase) => {
+      const present = Number(buckets?.[summaryAggNameForPhase(phase.key, "present")]?.doc_count || 0);
+      const absent = Number(buckets?.[summaryAggNameForPhase(phase.key, "absent")]?.doc_count || 0);
+      return {
+        label: phase.label,
+        present,
+        absent,
+        total: present + absent,
+      };
+    }).sort((a, b) => b.total - a.total);
+
+    if (!rows.some((row) => row.total > 0)) {
+      const empty = document.createElement("div");
+      empty.className = "stats-empty-state";
+      empty.textContent = "No phenophase summary is available for the current filters.";
+      container.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.classList.add("table", "table-striped");
+    table.appendChild(buildStatsTableHead(["Phenophase", "Present", "Absent", "Total"]));
+    table.appendChild(buildStatsTableBody(rows.map((row) => [
       row.label,
       row.present.toLocaleString(),
       row.absent.toLocaleString(),
       row.total.toLocaleString(),
-    ]),
-    "Phenophase Presence Summary"
-  );
-
-  const renderedTable = container.querySelector("table");
-  if (renderedTable) renderedTable.classList.add("table-striped");
-
-  const renderedTitle = container.querySelector(".stats-section-title");
-  if (renderedTitle) {
-    const renderedNote = document.createElement("p");
-    renderedNote.className = "stats-note";
-    renderedNote.textContent = summaryNoteText;
-    renderedTitle.insertAdjacentElement("afterend", renderedNote);
+    ])));
+    container.appendChild(table);
+    return;
   }
+
+  note.textContent = `Each chart shows one selected trait. Boxes use ${STATS_DOY_BIN_INTERVAL}-day day-of-year bins; the line inside each box is the median, and whiskers follow the Tukey box-plot rule to the nearest non-outlier bin in each decade.${traitNote}`;
+  container.appendChild(note);
+
+  if (typeof Chart !== "function") {
+    const fallback = document.createElement("div");
+    fallback.className = "stats-empty-state";
+    fallback.textContent = "Chart.js is not available, so the mapped trait charts could not be rendered.";
+    container.appendChild(fallback);
+    return;
+  }
+
+  ensurePhenologyBoxPlotPlugin();
+
+  const traitBuckets = (aggregations?.mappedTraitsByDecade_4?.buckets || [])
+    .filter((bucket) => !isStatsHiddenTrait(bucket?.key))
+    .filter((bucket) => (bucket?.doy_records?.doc_count || 0) > 0);
+
+  if (!traitBuckets.length) {
+    const empty = document.createElement("div");
+    empty.className = "stats-empty-state";
+    empty.textContent = "No mapped-trait day-of-year observations are available for the current filters. Select one or more traits in the sidebar, or choose a phenophase that maps to day-of-year records, then refresh Stats.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "trait-decade-grid";
+
+  traitBuckets.forEach((bucket) => {
+    const decadeBuckets = bucket?.doy_records?.decades?.buckets || [];
+    const labels = [];
+    const rangeData = [];
+    const boxStatsByIndex = [];
+    const countsByIndex = [];
+
+    decadeBuckets.forEach((decadeBucket) => {
+      const decadeStart = Math.floor(Number(decadeBucket?.key) / 10) * 10;
+      labels.push(statsFormatDecadeLabel(decadeStart));
+
+      const count = decadeBucket?.doc_count || 0;
+      countsByIndex.push(count);
+
+      if (!count) {
+        rangeData.push(null);
+        boxStatsByIndex.push(null);
+        return;
+      }
+
+      const stats = computeTukeyBoxStatsFromHistogram(decadeBucket?.doy_histogram?.buckets || []);
+      if (!stats) {
+        rangeData.push(null);
+        boxStatsByIndex.push(null);
+        return;
+      }
+
+      const clampedQ1 = Math.max(STATS_MIN_DOY, stats.q1);
+      const clampedMedian = Math.max(STATS_MIN_DOY, Math.min(STATS_MAX_DOY, stats.median));
+      const clampedQ3 = Math.min(STATS_MAX_DOY, stats.q3);
+      const clampedWhiskerLow = Math.max(STATS_MIN_DOY, stats.whiskerLow);
+      const clampedWhiskerHigh = Math.min(STATS_MAX_DOY, stats.whiskerHigh);
+
+      rangeData.push([
+        clampedQ1,
+        clampedQ3,
+      ]);
+      boxStatsByIndex.push({
+        q1: clampedQ1,
+        median: clampedMedian,
+        q3: clampedQ3,
+        whiskerLow: clampedWhiskerLow,
+        whiskerHigh: clampedWhiskerHigh,
+      });
+    });
+
+    const hasVisibleData = rangeData.some((value) => Array.isArray(value));
+    if (!hasVisibleData) return;
+
+    const card = document.createElement("section");
+    card.className = "trait-decade-card";
+
+    const header = document.createElement("div");
+    header.className = "trait-decade-card-header";
+
+    const traitTitle = document.createElement("h4");
+    traitTitle.className = "trait-decade-title";
+    traitTitle.textContent = bucket.key;
+    header.appendChild(traitTitle);
+
+    const traitMeta = document.createElement("div");
+    traitMeta.className = "trait-decade-meta";
+    traitMeta.textContent = `${bucket.doc_count.toLocaleString()} total record${bucket.doc_count === 1 ? "" : "s"} • ${bucket.doy_records.doc_count.toLocaleString()} with day of year`;
+    header.appendChild(traitMeta);
+
+    card.appendChild(header);
+
+    const chartWrap = document.createElement("div");
+    chartWrap.className = "trait-decade-canvas-wrap";
+    const canvas = document.createElement("canvas");
+    chartWrap.appendChild(canvas);
+    card.appendChild(chartWrap);
+    grid.appendChild(card);
+
+    const chart = new Chart(canvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            type: "bar",
+            label: "Box plot",
+            data: rangeData,
+            backgroundColor: "rgba(147, 197, 253, 0.65)",
+            borderColor: "rgba(37, 99, 235, 0.95)",
+            borderWidth: 1,
+            borderSkipped: false,
+            borderRadius: 4,
+          },
+        ],
+      },
+      options: {
+        animation: false,
+        maintainAspectRatio: false,
+        responsive: true,
+        interaction: {
+          mode: "index",
+          intersect: false,
+        },
+        plugins: {
+          phenologyBoxPlotOverlay: {
+            boxStats: boxStatsByIndex,
+            datasetIndex: 0,
+            strokeColor: "#0f172a",
+            medianColor: "#1d4ed8",
+          },
+          legend: {
+            position: "top",
+            labels: {
+              boxWidth: 12,
+              font: {
+                size: 11,
+                weight: "400",
+              },
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label(context) {
+                const count = countsByIndex[context.dataIndex] || 0;
+                const stats = boxStatsByIndex[context.dataIndex];
+                if (!stats) return "No day-of-year observations";
+                return [
+                  `Median: ${Math.round(stats.median)}`,
+                  `IQR: ${Math.round(stats.q1)}-${Math.round(stats.q3)}`,
+                  `Whiskers: ${Math.round(stats.whiskerLow)}-${Math.round(stats.whiskerHigh)}`,
+                  `n: ${count.toLocaleString()}`,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              autoSkip: true,
+              maxRotation: 0,
+              minRotation: 0,
+              font: { size: 10 },
+            },
+          },
+          y: {
+            min: STATS_MIN_DOY,
+            max: STATS_MAX_DOY,
+            title: {
+              display: true,
+              text: "Day of year",
+            },
+            ticks: {
+              stepSize: 60,
+            },
+          },
+        },
+      },
+    });
+
+    statsCharts.push(chart);
+  });
+
+  if (!grid.childElementCount) {
+    const empty = document.createElement("div");
+    empty.className = "stats-empty-state";
+    empty.textContent = "No mapped-trait day-of-year observations are available for the current filters.";
+    container.appendChild(empty);
+    return;
+  }
+
+  container.appendChild(grid);
 }
 
-async function renderStats(aggregations, options = {}) {
-  destroyStatsCharts();
-  const summaryOnly = !!options.summaryOnly;
-
+async function renderStatsOverviewSections(aggregations) {
   const datasourceBuckets = aggregations?.datasource_0?.buckets || [];
-  renderTable(
-    "datasourceTable",
-    ["Datasource", "Count"],
-    datasourceBuckets.map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]),
-    "Datasource Distribution"
-  );
+  renderDatasourceDistribution(datasourceBuckets);
   await yieldStatsRender();
 
   renderDecadeDistributionChart(aggregations);
-  await yieldStatsRender();
-
-  if (summaryOnly) {
-    renderGlobalPhenophaseSummary(aggregations);
-  } else {
-    renderTraitDecadeCharts(aggregations);
-  }
   await yieldStatsRender();
 
   const familyBuckets = aggregations?.family_2?.buckets || [];
@@ -1463,6 +1787,47 @@ async function renderStats(aggregations, options = {}) {
   await refreshDataReleaseHistorySection();
 }
 
+function renderDatasourceDistribution(buckets) {
+  renderTable(
+    "datasourceTable",
+    ["Datasource", "Count"],
+    (buckets || []).map((bucket) => [bucket.key, bucket.doc_count.toLocaleString()]),
+    "Datasource Distribution"
+  );
+}
+
+async function renderCachedDatasourceIfAvailable() {
+  if (window.currentMainTab !== "stats") return false;
+  if (!statsLoadState.loading && statsLoadState.completed) return false;
+
+  const cachedDatasource = getCachedStatsDatasourceAggregation();
+  if (!cachedDatasource?.buckets) return false;
+
+  renderDatasourceDistribution(cachedDatasource.buckets);
+  await yieldStatsRender();
+  return true;
+}
+
+async function renderCachedStatsOverviewIfAvailable() {
+  if (window.currentMainTab !== "stats") return false;
+  if (!statsLoadState.loading && statsLoadState.completed) return false;
+
+  const cachedAggregations = getCachedStatsOverviewAggregations();
+  if (!cachedAggregations) return renderCachedDatasourceIfAvailable();
+
+  await renderStatsOverviewSections(cachedAggregations);
+  return true;
+}
+
+async function renderStats(aggregations, options = {}) {
+  destroyStatsCharts();
+  const summaryOnly = !!options.summaryOnly;
+
+  await renderStatsOverviewSections(aggregations);
+  renderMappedTraitsSection(aggregations, { summaryOnly });
+  await yieldStatsRender();
+}
+
 function isSummaryOnlyStatsSnapshot(snapshot) {
   if (snapshot?.summaryOnly != null) return !!snapshot.summaryOnly;
   return !!snapshot?.aggregations?.phenophasePresenceSummary_4 && !snapshot?.aggregations?.mappedTraitsByDecade_4;
@@ -1476,6 +1841,9 @@ async function renderPrebuiltGlobalStatsSnapshot() {
   if (!isUsableGlobalStatsSnapshot(snapshot)) return false;
 
   window.lastStatsMeta = { traitNote: snapshot.traitNote || "" };
+  if (typeof window.renderDataSourceFacetAggregation === "function") {
+    window.renderDataSourceFacetAggregation(snapshot.aggregations.datasource_0);
+  }
   await renderStats(snapshot.aggregations, { summaryOnly: isSummaryOnlyStatsSnapshot(snapshot) });
   statsLoadState.activeRequest = null;
   statsLoadState.loading = false;
@@ -1505,6 +1873,7 @@ async function fetchStatsData() {
   const requestId = ++statsLoadState.requestId;
   const signature = getStatsQuerySignature();
   let summaryOnly = !shouldRenderTraitDecadeStats();
+  const traitConfigPromise = summaryOnly ? Promise.resolve(null) : getStatsTraitAggregationConfig();
 
   abortActiveStatsRequest();
   statsLoadState.loading = true;
@@ -1518,21 +1887,22 @@ async function fetchStatsData() {
 
   setStatsStatus("Stats are refreshing... please wait.", "info");
 
-  let statsMeta = summaryOnly
-    ? {
-      summaryOnly: true,
-      note: shouldUseGlobalSummaryStats()
-        ? "This lighter global summary shows high-level present and absent counts for the main simple phenophases. Detailed day-of-year trait charts are skipped here so the global overview renders faster."
-        : "This lighter filtered summary shows high-level present and absent counts for the main simple phenophases. Select a trait or simple phenophase to load day-of-year charts.",
+  if (summaryOnly) {
+    void renderCachedStatsOverviewIfAvailable().catch((error) => {
+      console.warn("Failed to render cached stats overview:", error);
+    });
+    if (window.currentMainTab === "stats" && getCachedStatsDatasourceAggregation() && typeof setLoaderStage === "function") {
+      setLoaderStage("Loading mapped trait summary...", 40);
     }
-    : await getStatsTraitAggregationConfig();
-  if (!statsMeta) {
-    summaryOnly = true;
-    statsMeta = {
-      summaryOnly: true,
-      note: "This lighter filtered summary shows high-level present and absent counts for the main simple phenophases. Select a trait or simple phenophase to load day-of-year charts.",
-    };
+  } else {
+    void renderCachedStatsOverviewIfAvailable().catch((error) => {
+      console.warn("Failed to render cached stats overview:", error);
+    });
+    if (window.currentMainTab === "stats" && getCachedStatsDatasourceAggregation() && typeof setLoaderStage === "function") {
+      setLoaderStage("Loading mapped trait charts...", 40);
+    }
   }
+
   if (requestId !== statsLoadState.requestId) {
     if (typeof hideLoader === "function") {
       hideLoader();
@@ -1540,93 +1910,142 @@ async function fetchStatsData() {
     return null;
   }
   if (window.currentMainTab === "stats" && typeof setLoaderStage === "function") {
-    setLoaderStage(summaryOnly ? "Summarizing global records..." : "Preparing stats charts...", 42);
+    setLoaderStage(summaryOnly ? "Loading stats summary..." : "Loading datasource counts...", 24);
   }
-  const requestBody = buildStatsRequestData(statsMeta);
 
-  const request = $.ajax({
-    url: STATS_API_URL,
-    method: "POST",
-    contentType: "application/json",
-    data: JSON.stringify(requestBody),
-    dataType: "json",
-    success(response) {
-      if (requestId !== statsLoadState.requestId) return;
-      statsLoadState.activeRequest = null;
-      statsLoadState.loading = false;
-      if (typeof setLoaderStage === "function") {
-        setLoaderStage(summaryOnly ? "Rendering global summary..." : "Rendering stats...", 92);
-      }
+  const summaryMeta = {
+    summaryOnly,
+    note: buildStatsSummaryOnlyNote(shouldUseGlobalSummaryStats()),
+  };
 
-      if (response && response.aggregations) {
-        window.lastStatsMeta = { traitNote: statsMeta.note };
-        renderStats(response.aggregations, { summaryOnly })
-          .then(() => {
-            if (requestId !== statsLoadState.requestId) return;
-            statsLoadState.signature = signature;
-            statsLoadState.completed = true;
-            statsLoadState.stale = false;
-            setStatsStatus(summaryOnly ? "Summary updated." : "Stats updated.", "success");
-            if (typeof window.setResultsHeadingText === "function" && window.currentMainTab === "stats") {
-              window.setResultsHeadingText(isUnfilteredStatsQuery(currentStatsQuery()) ? "Showing global stats overview" : "Showing filtered stats");
-            }
-          })
-          .catch((error) => {
-            if (requestId !== statsLoadState.requestId) return;
-            console.error("Error rendering stats:", error);
-            statsLoadState.completed = false;
-            statsLoadState.stale = true;
-            setStatsStatus("Stats data loaded, but one or more sections failed to render.", "error");
-          })
-          .finally(() => {
-            if (requestId !== statsLoadState.requestId) return;
-            if (typeof hideLoader === "function") {
-              hideLoader();
-            }
-          });
-        return;
-      }
-
-      console.error("No aggregations in response.");
+  try {
+    const summaryResponse = await runStatsAjaxRequest(buildStatsOverviewRequestData(summaryMeta), requestId);
+    if (requestId !== statsLoadState.requestId) return null;
+    if (!summaryResponse) return null;
+    if (!summaryResponse?.aggregations) {
+      console.error("No aggregations in summary response.");
       statsLoadState.completed = false;
       statsLoadState.stale = true;
-      if (typeof hideLoader === "function") {
-        hideLoader();
-      }
+      if (typeof hideLoader === "function") hideLoader();
       setStatsStatus('No stats data is available for the current filters. Click "Refresh Stats" to try again. If needed, narrow by phenophase, scientific name, geographic scope, or time period.', "error");
-    },
-    error(error) {
-      if (error?.statusText === "abort") {
-        if (typeof hideLoader === "function") {
-          hideLoader();
-        }
-        return;
-      }
-      if (requestId !== statsLoadState.requestId) return;
-      statsLoadState.activeRequest = null;
+      return null;
+    }
+
+    window.lastStatsMeta = { traitNote: summaryMeta.note };
+    if (window.currentMainTab === "stats" && typeof setLoaderStage === "function") {
+      setLoaderStage("Rendering datasource, decade, family, and genus counts...", 58);
+    }
+
+    await renderStatsOverviewSections(summaryResponse.aggregations);
+    if (requestId !== statsLoadState.requestId) return null;
+
+    if (summaryOnly) {
+      renderMappedTraitsSection(summaryResponse.aggregations, { summaryOnly: true });
+      if (requestId !== statsLoadState.requestId) return null;
+      statsLoadState.signature = signature;
+      statsLoadState.completed = true;
+      statsLoadState.stale = false;
       statsLoadState.loading = false;
+      setStatsStatus("Summary updated.", "success");
+      if (typeof window.setResultsHeadingText === "function" && window.currentMainTab === "stats") {
+        window.setResultsHeadingText(isUnfilteredStatsQuery(currentStatsQuery()) ? "Showing global stats overview" : "Showing filtered stats");
+      }
+      if (typeof hideLoader === "function") hideLoader();
+      return summaryResponse;
+    }
+
+    if (window.currentMainTab === "stats" && typeof setLoaderStage === "function") {
+      setLoaderStage("Preparing mapped trait charts...", 72);
+    }
+
+    let statsMeta = null;
+    try {
+      statsMeta = await traitConfigPromise;
+    } catch (error) {
+      console.warn("Failed to prepare mapped trait aggregation config:", error);
+      statsMeta = null;
+    }
+
+    if (requestId !== statsLoadState.requestId) return null;
+    if (!statsMeta) {
+      renderMappedTraitsSection(summaryResponse.aggregations, {
+        errorMessage: "Mapped trait charts could not be prepared for the current filters.",
+      });
+      statsLoadState.signature = signature;
       statsLoadState.completed = false;
       statsLoadState.stale = true;
-      if (typeof hideLoader === "function") {
-        hideLoader();
-      }
-      console.error("Error fetching stats:", error);
-      const reason = error?.responseJSON?.error?.reason
-        || error?.responseJSON?.error?.root_cause?.[0]?.reason
-        || error?.statusText
-        || error?.responseText
-        || "Failed to load stats data.";
-      setStatsStatus(`Failed to load stats data. ${reason} If the query is broad, try filtering by phenophase, scientific name, geographic scope, or time period.`, "error");
-    },
-  });
+      statsLoadState.loading = false;
+      setStatsStatus("Stats summary loaded, but mapped trait charts could not be prepared.", "error");
+      if (typeof hideLoader === "function") hideLoader();
+      return summaryResponse;
+    }
 
-  statsLoadState.activeRequest = request;
-  return request;
+    if (window.currentMainTab === "stats" && typeof setLoaderStage === "function") {
+      setLoaderStage("Loading mapped trait charts...", 82);
+    }
+
+    const mappedResponse = await runStatsAjaxRequest(buildStatsMappedTraitsRequestData(statsMeta), requestId);
+    if (requestId !== statsLoadState.requestId) return null;
+    if (!mappedResponse) return null;
+    if (!mappedResponse?.aggregations) {
+      renderMappedTraitsSection(summaryResponse.aggregations, {
+        errorMessage: "Mapped trait charts could not be loaded for the current filters.",
+      });
+      statsLoadState.signature = signature;
+      statsLoadState.completed = false;
+      statsLoadState.stale = true;
+      statsLoadState.loading = false;
+      setStatsStatus("Stats summary loaded, but mapped trait charts could not be loaded.", "error");
+      if (typeof hideLoader === "function") hideLoader();
+      return summaryResponse;
+    }
+
+    window.lastStatsMeta = { traitNote: statsMeta.note };
+    if (window.currentMainTab === "stats" && typeof setLoaderStage === "function") {
+      setLoaderStage("Rendering mapped trait charts...", 92);
+    }
+
+    renderMappedTraitsSection(mappedResponse.aggregations, { summaryOnly: false });
+    if (requestId !== statsLoadState.requestId) return null;
+
+    statsLoadState.signature = signature;
+    statsLoadState.completed = true;
+    statsLoadState.stale = false;
+    statsLoadState.loading = false;
+    setStatsStatus("Stats updated.", "success");
+    if (typeof window.setResultsHeadingText === "function" && window.currentMainTab === "stats") {
+      window.setResultsHeadingText(isUnfilteredStatsQuery(currentStatsQuery()) ? "Showing global stats overview" : "Showing filtered stats");
+    }
+    if (typeof hideLoader === "function") hideLoader();
+    return mappedResponse;
+  } catch (error) {
+    if (requestId !== statsLoadState.requestId) return null;
+    statsLoadState.activeRequest = null;
+    statsLoadState.loading = false;
+    statsLoadState.completed = false;
+    statsLoadState.stale = true;
+    if (typeof hideLoader === "function") {
+      hideLoader();
+    }
+    console.error("Error fetching stats:", error);
+    const reason = error?.responseJSON?.error?.reason
+      || error?.responseJSON?.error?.root_cause?.[0]?.reason
+      || error?.statusText
+      || error?.responseText
+      || "Failed to load stats data.";
+    setStatsStatus(`Failed to load stats data. ${reason} If the query is broad, try filtering by phenophase, scientific name, geographic scope, or time period.`, "error");
+    return null;
+  }
 }
 
 window.fetchStatsData = fetchStatsData;
 window.markStatsNeedsRefresh = markStatsNeedsRefresh;
 window.showInitialStatsView = showInitialStatsView;
+window.onFacetStatsAggregationsAvailable = function onFacetStatsAggregationsAvailable() {
+  void renderCachedStatsOverviewIfAvailable().catch((error) => {
+    console.warn("Failed to render facet-backed stats overview:", error);
+  });
+};
 window.hasRenderedStats = function hasRenderedStats() {
   return !!statsLoadState.completed && !statsLoadState.stale;
 };

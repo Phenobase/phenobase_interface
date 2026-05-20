@@ -210,6 +210,8 @@ let activeTableRequest = null;
 let tableRequestId = 0;
 let activeFacetRequest = null;
 let facetRequestId = 0;
+let activeDataSourceFacetRequest = null;
+let dataSourceFacetRequestId = 0;
 const tableTotalCache = new Map();
 
 function updateLoaderProgress(stageText, progressPercent) {
@@ -450,15 +452,13 @@ function fetchFacetData(options = {}) {
   if (activeFacetRequest && typeof activeFacetRequest.abort === "function") {
     activeFacetRequest.abort();
   }
+  if (!options.skipDatasourcePreview) {
+    fetchDataSourceFacetData();
+  }
   const onSuccess = typeof options.onSuccess === 'function' ? options.onSuccess : null;
   const onError = typeof options.onError === 'function' ? options.onError : null;
   const facetApiUrl = `${apiUrl.split('?')[0]}?size=0&from=0`;
-  const requestBody = {
-    ...requestData,
-    size: 0,
-    from: 0,
-    track_total_hits: false,
-  };
+  const requestBody = buildFacetRequestBody(requestData.aggs);
 
   activeFacetRequest = $.ajax({
     url: facetApiUrl,
@@ -486,6 +486,57 @@ function fetchFacetData(options = {}) {
     }
   });
   return activeFacetRequest;
+}
+
+function buildFacetRequestBody(aggs) {
+  return {
+    ...requestData,
+    aggs,
+    size: 0,
+    from: 0,
+    track_total_hits: false,
+  };
+}
+
+function fetchDataSourceFacetData() {
+  const requestId = ++dataSourceFacetRequestId;
+  if (activeDataSourceFacetRequest && typeof activeDataSourceFacetRequest.abort === "function") {
+    activeDataSourceFacetRequest.abort();
+  }
+  if (typeof window.renderDataSourceFacetLoading === 'function') {
+    window.renderDataSourceFacetLoading('Loading data sources...');
+  }
+
+  const facetApiUrl = `${apiUrl.split('?')[0]}?size=0&from=0`;
+  const requestBody = buildFacetRequestBody({
+    datasource_0: { terms: { field: "dataSource", size: 100 } },
+  });
+
+  activeDataSourceFacetRequest = $.ajax({
+    url: facetApiUrl,
+    method: "POST",
+    contentType: "application/json",
+    data: JSON.stringify(requestBody),
+    dataType: "json",
+    success(response) {
+      if (requestId !== dataSourceFacetRequestId) return;
+      activeDataSourceFacetRequest = null;
+      const datasourceAggregation = response?.aggregations?.datasource_0;
+      if (datasourceAggregation && typeof window.renderDataSourceFacetAggregation === 'function') {
+        window.renderDataSourceFacetAggregation(datasourceAggregation);
+        return;
+      }
+      console.error("Unexpected datasource facet response", response);
+    },
+    error(error) {
+      if (error?.statusText === "abort") return;
+      if (requestId !== dataSourceFacetRequestId) return;
+      activeDataSourceFacetRequest = null;
+      console.error("Error fetching datasource facet data:", error);
+    }
+  });
+
+  return activeDataSourceFacetRequest;
 }
 
 function renderResults(results) {

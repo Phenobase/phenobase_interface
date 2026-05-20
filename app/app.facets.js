@@ -1518,12 +1518,51 @@
       .filter(Boolean);
   }
 
+  function currentFacetSignature() {
+    if (typeof window.getCurrentQuerySignature === 'function') {
+      return window.getCurrentQuerySignature();
+    }
+    try {
+      return JSON.stringify(window.requestData?.query || { match_all: {} });
+    } catch (_error) {
+      return String(Date.now());
+    }
+  }
+
+  function cacheFacetAggregations(aggregations) {
+    const existing = window.lastFacetStatsAggregations || {};
+    window.lastFacetStatsAggregations = {
+      ...existing,
+      ...aggregations,
+    };
+    window.lastFacetStatsSignature = currentFacetSignature();
+  }
+
+  function renderDataSourceFacetAggregation(aggregation) {
+    if (!aggregation?.buckets) return;
+    selectedFacets = window.selectedFacets || {};
+    cacheFacetAggregations({ datasource_0: aggregation });
+    updateAvailableDataSources({ datasource_0: aggregation });
+    renderFacetLinks(aggregation, '#dataSourceFacets', 'dataSource');
+
+    if (typeof window.onFacetStatsAggregationsAvailable === 'function') {
+      window.onFacetStatsAggregationsAvailable(window.lastFacetStatsAggregations);
+    }
+  }
+
+  function renderDataSourceFacetLoading(message) {
+    $('#dataSourceFacets').html(
+      `<div class="facet-loading-state">${message || 'Loading data sources...'}</div>`
+    );
+  }
+
   // -----------------------
   // Main entry from facet-data success
   // -----------------------
   function renderFacets(aggregations) {
     selectedFacets = window.selectedFacets || {};
     updateAvailableDataSources(aggregations);
+    cacheFacetAggregations(aggregations);
 
     $('#dataSourceFacets').empty();
     $('#allTraitsFilters').empty();
@@ -1539,9 +1578,15 @@
 
     renderSelectedFacets();
     updateQuerySummary();
+
+    if (typeof window.onFacetStatsAggregationsAvailable === 'function') {
+      window.onFacetStatsAggregationsAvailable(aggregations);
+    }
   }
 
   window.renderFacets = renderFacets;
+  window.renderDataSourceFacetAggregation = renderDataSourceFacetAggregation;
+  window.renderDataSourceFacetLoading = renderDataSourceFacetLoading;
 
   $(document).ready(function () {
     bindCustomControls();

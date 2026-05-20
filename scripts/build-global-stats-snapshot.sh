@@ -24,7 +24,7 @@ cat > "$TMP_REQUEST" <<JSON
     }
   },
   "aggs": {
-    "datasource_0": { "terms": { "field": "dataSource", "size": 10 } },
+    "datasource_0": { "terms": { "field": "dataSource", "size": 100 } },
     "decadeDistribution_1": {
       "histogram": {
         "field": "decadeStart",

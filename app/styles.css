@@ -322,6 +322,13 @@
   font-size: 12px;
 }
 
+.facet-loading-state {
+  padding: 8px 0;
+  color: #64748b;
+  font-size: 12px;
+  font-style: italic;
+}
+
 .remove-facet {
   margin-left: 5px;
   color: #d9534f;

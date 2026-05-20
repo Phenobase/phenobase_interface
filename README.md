@@ -217,12 +217,20 @@ For the unfiltered landing view, the app can also load a pre-rendered snapshot f
 #### Current stats sections
 
 - `Datasource Distribution`
-- `Phenophase Presence Summary` for the unfiltered global landing view
-- `Mapped Traits: Day of Year by Decade` for filtered stats views
+- `Mapped Traits: Day of Year by Decade`
 - `Family Distribution`
 - `Genus Distribution`
+- `Data Release History`
 
 #### Mapped trait decade charts
+
+The Stats view keeps the `Mapped Traits: Day of Year by Decade` header visible at all times.
+
+How the section behaves:
+
+- if you select one or more mapped traits in the sidebar, the UI renders a small-multiple chart for each selected trait with `dayOfYear` data
+- if no mapped traits are selected, the same section shows a phenophase presence summary instead
+- if you want the chart view, select one or more traits and then refresh Stats
 
 For each mapped trait with `dayOfYear` data, the UI renders a small-multiple chart by decade.
 
@@ -258,9 +266,10 @@ The frontend only uses that file when:
 
 - `"ready": true`
 - the file includes the expected top-level aggregations
+- `generatedAt` or `cachedAt` is within the configured freshness window, 24 hours by default
 - the current view is the unfiltered global stats page
 
-If the file is missing, incomplete, or still marked `"ready": false`, the UI falls back to a live global-summary request.
+If the file is missing, incomplete, stale, or still marked `"ready": false`, the UI falls back to a live global-summary request.
 
 Example workflow:
 
@@ -280,6 +289,8 @@ API_URL="https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=0&
 
 2. Commit and deploy the updated `app/global-stats-snapshot.json`.
 
+The repository also includes a GitHub Actions workflow at `.github/workflows/refresh-global-stats-snapshot.yml` that rebuilds and commits the snapshot once per day at 09:17 UTC. It can also be run manually from the Actions tab with `workflow_dispatch`.
+
 Reference: raw request shape used by the helper script:
 
 ```bash
@@ -295,7 +306,7 @@ cat > /tmp/phenobase-global-stats-request.json <<'JSON'
     }
   },
   "aggs": {
-    "datasource_0": { "terms": { "field": "dataSource", "size": 10 } },
+    "datasource_0": { "terms": { "field": "dataSource", "size": 100 } },
     "decadeDistribution_1": {
       "histogram": {
         "field": "decadeStart",
@@ -348,6 +359,7 @@ Notes:
 - Update the histogram `extended_bounds.max` value if your indexed maximum decade changes.
 - The default landing snapshot intentionally starts at `MIN_DECADE=1970`; override `MIN_DECADE` only if the default UI range changes.
 - Keep the snapshot in source control if you want static hosting to serve it directly.
+- The browser treats snapshots older than 24 hours as stale by default. Override with `window.phenobaseGlobalStatsSnapshotMaxAgeHours` before `app.stats.js` loads if needed.
 - `Refresh Stats` in the UI still requests live data; the pre-rendered file only affects the default unfiltered landing view.
 
 #### After releasing new data
@@ -385,6 +397,8 @@ After inserting or updating records in the datastore, update these frontend-faci
    - `app/global-stats-snapshot.json`
 
 If you skip these steps, the live query API may have the new records, but the default landing-page summary and release-history section can lag behind the actual datastore contents.
+
+The Stats tab now always shows release history, even when the current query is filtered. If the history file is missing or empty, the UI shows an in-place empty state instead of hiding the section.
 
 ## Backend API Calls
 
