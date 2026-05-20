@@ -1,68 +1,72 @@
 {
   "ready": true,
-  "generatedAt": "2026-05-20T15:32:33Z",
+  "generatedAt": "2026-05-20T16:12:38Z",
   "summaryOnly": true,
   "traitNote": "Showing a lighter high-level phenophase summary for the unfiltered global view.",
   "aggregations": {
     "genus_3": {
       "doc_count_error_upper_bound": 0,
-      "sum_other_doc_count": 30510404,
+      "sum_other_doc_count": 35232014,
       "buckets": [
         {
           "key": "Acer",
-          "doc_count": 4007156
+          "doc_count": 4016088
         },
         {
           "key": "Quercus",
-          "doc_count": 3607864
+          "doc_count": 3610888
         },
         {
           "key": "Cornus",
-          "doc_count": 1089938
-        },
-        {
-          "key": "Betula",
-          "doc_count": 955151
+          "doc_count": 1104400
         },
         {
           "key": "Prunus",
-          "doc_count": 939269
+          "doc_count": 957643
+        },
+        {
+          "key": "Betula",
+          "doc_count": 955853
         },
         {
           "key": "Populus",
-          "doc_count": 892305
+          "doc_count": 893260
         },
         {
           "key": "Vaccinium",
-          "doc_count": 759925
+          "doc_count": 768124
         },
         {
           "key": "Rubus",
-          "doc_count": 677347
+          "doc_count": 697857
         },
         {
           "key": "Liriodendron",
-          "doc_count": 636553
-        },
-        {
-          "key": "Sambucus",
-          "doc_count": 596942
+          "doc_count": 638685
         },
         {
           "key": "Lonicera",
-          "doc_count": 593175
+          "doc_count": 614102
         },
         {
-          "key": "Mangifera",
-          "doc_count": 545939
-        },
-        {
-          "key": "Fagus",
-          "doc_count": 543930
+          "key": "Sambucus",
+          "doc_count": 610357
         },
         {
           "key": "Asclepias",
-          "doc_count": 520864
+          "doc_count": 558301
+        },
+        {
+          "key": "Mangifera",
+          "doc_count": 546066
+        },
+        {
+          "key": "Fagus",
+          "doc_count": 544156
+        },
+        {
+          "key": "Viburnum",
+          "doc_count": 519099
         },
         {
           "key": "Pinus",
@@ -70,143 +74,139 @@
         },
         {
           "key": "Artocarpus",
-          "doc_count": 516340
-        },
-        {
-          "key": "Viburnum",
-          "doc_count": 507941
+          "doc_count": 516342
         },
         {
           "key": "Carya",
-          "doc_count": 461702
+          "doc_count": 461907
         },
         {
           "key": "Amelanchier",
-          "doc_count": 438810
+          "doc_count": 442324
         },
         {
           "key": "Liquidambar",
-          "doc_count": 435992
+          "doc_count": 436149
         },
         {
           "key": "Cercis",
-          "doc_count": 430558
-        },
-        {
-          "key": "Ilex",
-          "doc_count": 417452
+          "doc_count": 434747
         },
         {
           "key": "Rosa",
-          "doc_count": 409100
+          "doc_count": 425912
+        },
+        {
+          "key": "Ilex",
+          "doc_count": 419607
         },
         {
           "key": "Aesculus",
-          "doc_count": 401887
+          "doc_count": 407255
         },
         {
           "key": "Fraxinus",
-          "doc_count": 359648
+          "doc_count": 360370
         },
         {
           "key": "Salix",
-          "doc_count": 341237
+          "doc_count": 345308
         },
         {
           "key": "Baccharis",
-          "doc_count": 338480
-        },
-        {
-          "key": "Rhus",
-          "doc_count": 330756
+          "doc_count": 342545
         },
         {
           "key": "Eriogonum",
-          "doc_count": 324904
+          "doc_count": 338396
+        },
+        {
+          "key": "Rhus",
+          "doc_count": 333598
         },
         {
           "key": "Prosopis",
-          "doc_count": 308148
+          "doc_count": 308160
         },
         {
           "key": "Symphoricarpos",
-          "doc_count": 295038
-        },
-        {
-          "key": "Lindera",
-          "doc_count": 270943
-        },
-        {
-          "key": "Rhododendron",
-          "doc_count": 265893
-        },
-        {
-          "key": "Ulmus",
-          "doc_count": 258690
-        },
-        {
-          "key": "Berberis",
-          "doc_count": 256112
-        },
-        {
-          "key": "Ficus",
-          "doc_count": 247930
-        },
-        {
-          "key": "Trillium",
-          "doc_count": 243334
-        },
-        {
-          "key": "Syringa",
-          "doc_count": 238287
-        },
-        {
-          "key": "Tilia",
-          "doc_count": 236572
-        },
-        {
-          "key": "Toxicodendron",
-          "doc_count": 232240
-        },
-        {
-          "key": "Carex",
-          "doc_count": 229846
-        },
-        {
-          "key": "Juglans",
-          "doc_count": 221971
-        },
-        {
-          "key": "Maianthemum",
-          "doc_count": 221457
-        },
-        {
-          "key": "Celtis",
-          "doc_count": 220443
-        },
-        {
-          "key": "Carpinus",
-          "doc_count": 213928
-        },
-        {
-          "key": "Corylus",
-          "doc_count": 211397
-        },
-        {
-          "key": "Magnolia",
-          "doc_count": 208061
+          "doc_count": 296549
         },
         {
           "key": "Trifolium",
-          "doc_count": 206228
+          "doc_count": 295930
+        },
+        {
+          "key": "Rhododendron",
+          "doc_count": 278654
+        },
+        {
+          "key": "Trillium",
+          "doc_count": 278225
+        },
+        {
+          "key": "Lindera",
+          "doc_count": 273183
+        },
+        {
+          "key": "Berberis",
+          "doc_count": 262693
+        },
+        {
+          "key": "Ulmus",
+          "doc_count": 258950
+        },
+        {
+          "key": "Ficus",
+          "doc_count": 248020
         },
         {
           "key": "Solanum",
-          "doc_count": 206199
+          "doc_count": 244376
         },
         {
-          "key": "Bouteloua",
-          "doc_count": 205932
+          "key": "Carex",
+          "doc_count": 242350
+        },
+        {
+          "key": "Syringa",
+          "doc_count": 240283
+        },
+        {
+          "key": "Maianthemum",
+          "doc_count": 238266
+        },
+        {
+          "key": "Tilia",
+          "doc_count": 236881
+        },
+        {
+          "key": "Toxicodendron",
+          "doc_count": 233529
+        },
+        {
+          "key": "Juglans",
+          "doc_count": 222247
+        },
+        {
+          "key": "Celtis",
+          "doc_count": 220575
+        },
+        {
+          "key": "Ribes",
+          "doc_count": 217441
+        },
+        {
+          "key": "Carpinus",
+          "doc_count": 214235
+        },
+        {
+          "key": "Corylus",
+          "doc_count": 213947
+        },
+        {
+          "key": "Magnolia",
+          "doc_count": 209368
         }
       ]
     },
@@ -222,7 +222,7 @@
           "doc_count": 0
         },
         "flower_present": {
-          "doc_count": 11547190
+          "doc_count": 16722190
         },
         "open_flower_absent": {
           "doc_count": 4288509
@@ -258,207 +258,207 @@
     },
     "family_2": {
       "doc_count_error_upper_bound": 0,
-      "sum_other_doc_count": 7400038,
+      "sum_other_doc_count": 8650893,
       "buckets": [
         {
           "key": "Sapindaceae",
-          "doc_count": 4439351
-        },
-        {
-          "key": "Fagaceae",
-          "doc_count": 4200549
-        },
-        {
-          "key": "Rosaceae",
-          "doc_count": 4102367
+          "doc_count": 4455575
         },
         {
           "key": "Asteraceae",
-          "doc_count": 3595505
+          "doc_count": 4284481
+        },
+        {
+          "key": "Rosaceae",
+          "doc_count": 4266648
+        },
+        {
+          "key": "Fagaceae",
+          "doc_count": 4204584
         },
         {
           "key": "Fabaceae",
-          "doc_count": 2809272
+          "doc_count": 3258393
         },
         {
           "key": "Ericaceae",
-          "doc_count": 1754549
+          "doc_count": 1851173
         },
         {
           "key": "Poaceae",
-          "doc_count": 1639029
+          "doc_count": 1690989
         },
         {
           "key": "Betulaceae",
-          "doc_count": 1633135
+          "doc_count": 1637699
         },
         {
           "key": "Salicaceae",
-          "doc_count": 1233885
+          "doc_count": 1239195
         },
         {
           "key": "Cornaceae",
-          "doc_count": 1082334
+          "doc_count": 1096838
+        },
+        {
+          "key": "Caprifoliaceae",
+          "doc_count": 1023074
+        },
+        {
+          "key": "Lamiaceae",
+          "doc_count": 1003550
+        },
+        {
+          "key": "Ranunculaceae",
+          "doc_count": 983177
         },
         {
           "key": "Pinaceae",
           "doc_count": 982785
         },
         {
-          "key": "Caprifoliaceae",
-          "doc_count": 968503
-        },
-        {
           "key": "Oleaceae",
-          "doc_count": 953581
+          "doc_count": 963545
         },
         {
           "key": "Magnoliaceae",
-          "doc_count": 831715
-        },
-        {
-          "key": "Ranunculaceae",
-          "doc_count": 787868
-        },
-        {
-          "key": "Lamiaceae",
-          "doc_count": 750813
+          "doc_count": 835154
         },
         {
           "key": "Apocynaceae",
-          "doc_count": 716287
-        },
-        {
-          "key": "Juglandaceae",
-          "doc_count": 681920
-        },
-        {
-          "key": "Anacardiaceae",
-          "doc_count": 659349
+          "doc_count": 799082
         },
         {
           "key": "Asparagaceae",
-          "doc_count": 653462
+          "doc_count": 749734
+        },
+        {
+          "key": "Brassicaceae",
+          "doc_count": 724347
+        },
+        {
+          "key": "Juglandaceae",
+          "doc_count": 682436
+        },
+        {
+          "key": "Anacardiaceae",
+          "doc_count": 666115
         },
         {
           "key": "Adoxaceae",
           "doc_count": 612496
         },
         {
-          "key": "Lauraceae",
-          "doc_count": 583326
+          "key": "Malvaceae",
+          "doc_count": 602847
         },
         {
           "key": "Polygonaceae",
-          "doc_count": 561535
-        },
-        {
-          "key": "Brassicaceae",
-          "doc_count": 555880
-        },
-        {
-          "key": "Malvaceae",
-          "doc_count": 546927
-        },
-        {
-          "key": "Cactaceae",
-          "doc_count": 499357
-        },
-        {
-          "key": "Viburnaceae",
-          "doc_count": 492160
-        },
-        {
-          "key": "Altingiaceae",
-          "doc_count": 434293
-        },
-        {
-          "key": "Rhamnaceae",
-          "doc_count": 425142
-        },
-        {
-          "key": "Aquifoliaceae",
-          "doc_count": 416744
+          "doc_count": 601891
         },
         {
           "key": "Plantaginaceae",
-          "doc_count": 414878
+          "doc_count": 590861
         },
         {
-          "key": "Apiaceae",
-          "doc_count": 394077
+          "key": "Lauraceae",
+          "doc_count": 587968
         },
         {
           "key": "Orchidaceae",
-          "doc_count": 389745
+          "doc_count": 580627
         },
         {
-          "key": "Rubiaceae",
-          "doc_count": 356011
+          "key": "Cactaceae",
+          "doc_count": 521562
         },
         {
-          "key": "Solanaceae",
-          "doc_count": 355157
+          "key": "Viburnaceae",
+          "doc_count": 517693
         },
         {
-          "key": "Liliaceae",
-          "doc_count": 352526
-        },
-        {
-          "key": "Berberidaceae",
-          "doc_count": 350250
-        },
-        {
-          "key": "Cyperaceae",
-          "doc_count": 347546
+          "key": "Apiaceae",
+          "doc_count": 477817
         },
         {
           "key": "Boraginaceae",
-          "doc_count": 325328
+          "doc_count": 474561
+        },
+        {
+          "key": "Rhamnaceae",
+          "doc_count": 438661
+        },
+        {
+          "key": "Altingiaceae",
+          "doc_count": 434450
         },
         {
           "key": "Caryophyllaceae",
-          "doc_count": 304859
+          "doc_count": 434048
         },
         {
-          "key": "Melanthiaceae",
-          "doc_count": 275051
+          "key": "Liliaceae",
+          "doc_count": 428576
+        },
+        {
+          "key": "Rubiaceae",
+          "doc_count": 422576
+        },
+        {
+          "key": "Solanaceae",
+          "doc_count": 419506
+        },
+        {
+          "key": "Aquifoliaceae",
+          "doc_count": 418899
+        },
+        {
+          "key": "Cyperaceae",
+          "doc_count": 372727
+        },
+        {
+          "key": "Berberidaceae",
+          "doc_count": 363333
+        },
+        {
+          "key": "Papaveraceae",
+          "doc_count": 339077
         },
         {
           "key": "Euphorbiaceae",
-          "doc_count": 270587
+          "doc_count": 321882
+        },
+        {
+          "key": "Melanthiaceae",
+          "doc_count": 319530
+        },
+        {
+          "key": "Onagraceae",
+          "doc_count": 317909
+        },
+        {
+          "key": "Primulaceae",
+          "doc_count": 276312
+        },
+        {
+          "key": "Orobanchaceae",
+          "doc_count": 274321
+        },
+        {
+          "key": "Geraniaceae",
+          "doc_count": 264099
         },
         {
           "key": "Ulmaceae",
-          "doc_count": 260016
+          "doc_count": 260287
         },
         {
           "key": "Cupressaceae",
           "doc_count": 258879
         },
         {
-          "key": "Papaveraceae",
-          "doc_count": 250058
-        },
-        {
-          "key": "Onagraceae",
-          "doc_count": 245750
-        },
-        {
           "key": "Celastraceae",
-          "doc_count": 242117
-        },
-        {
-          "key": "Cannabaceae",
-          "doc_count": 232303
-        },
-        {
-          "key": "Moraceae",
-          "doc_count": 222944
-        },
-        {
-          "key": "Hamamelidaceae",
-          "doc_count": 206856
+          "doc_count": 251233
         }
       ]
     },
@@ -467,12 +467,12 @@
       "sum_other_doc_count": 0,
       "buckets": [
         {
-          "key": "USA National Phenology Network",
-          "doc_count": 25149551
+          "key": "iNaturalist",
+          "doc_count": 26755604
         },
         {
-          "key": "iNaturalist",
-          "doc_count": 21580604
+          "key": "USA National Phenology Network",
+          "doc_count": 25149551
         },
         {
           "key": "National Ecological Observatory Network (USA)",
@@ -520,7 +520,7 @@
         },
         {
           "key": 2020.0,
-          "doc_count": 36523702
+          "doc_count": 41698702
         }
       ]
     }
