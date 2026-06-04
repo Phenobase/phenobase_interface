@@ -283,6 +283,11 @@
       let activeDownloadAbort = null;
       let downloadProgressTimer = null;
       let downloadStartedAt = 0;
+      const DOWNLOAD_MAPPING_URL = "https://biscicol.org/phenobase/api/v1/query//phenobase2/_mapping";
+      const DOWNLOAD_PAGE_SIZE = 1000;
+      const CLIENT_DOWNLOAD_LIMIT = 100000;
+      const REQUIRED_DOWNLOAD_FIELDS = ["observedMetadataUrl"];
+      let downloadCrcTable = null;
 
       function setDownloadProgress(percent) {
         const safePercent = Math.max(0, Math.min(100, Math.round(percent || 0)));
@@ -365,33 +370,319 @@
         window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
       }
 
-      async function readDownloadResponse(response) {
-        const contentLength = Number(response.headers.get("Content-Length") || 0);
-        if (!response.body || !Number.isFinite(contentLength) || contentLength <= 0) {
-          setDownloadStatus("Download package ready", "Receiving ZIP from the server.", { percent: 80 });
-          return response.blob();
+      async function fetchDownloadJson(url, options = {}) {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `Request failed with status ${response.status}`);
+        }
+        return response.json();
+      }
+
+      function getMappingProperties(mapping) {
+        const firstIndex = mapping && Object.values(mapping)[0];
+        return (firstIndex && firstIndex.mappings && firstIndex.mappings.properties)
+          || (mapping && mapping.mappings && mapping.mappings.properties)
+          || {};
+      }
+
+      async function fetchDownloadFields(signal) {
+        setDownloadStatus("Preparing download", "Reading the Phenobase field list.", { percent: 8 });
+        const mapping = await fetchDownloadJson(DOWNLOAD_MAPPING_URL, { signal });
+        const fields = Object.keys(getMappingProperties(mapping));
+        const missingFields = REQUIRED_DOWNLOAD_FIELDS.filter((field) => !fields.includes(field));
+        if (missingFields.length) {
+          throw new Error(`Download mapping is missing required field(s): ${missingFields.join(", ")}`);
+        }
+        return fields;
+      }
+
+      function getDownloadQuery() {
+        return requestData && requestData.query ? requestData.query : { match_all: {} };
+      }
+
+      function getTotalHitsValue(response) {
+        const total = response && response.hits && response.hits.total;
+        if (typeof total === "number") return total;
+        if (total && typeof total.value === "number") return total.value;
+        return null;
+      }
+
+      async function fetchDownloadRecords(query, limit, signal) {
+        const searchUrl = apiUrl.split("?")[0];
+        const records = [];
+        let totalPossible = null;
+        let searchAfter = null;
+
+        while (records.length < limit) {
+          const pageSize = Math.min(DOWNLOAD_PAGE_SIZE, limit - records.length);
+          const body = {
+            size: pageSize,
+            _source: true,
+            query: query || { match_all: {} },
+            sort: [
+              {
+                annotationID: {
+                  order: "asc",
+                  missing: "_last",
+                },
+              },
+            ],
+            track_total_hits: records.length === 0,
+          };
+          if (searchAfter) body.search_after = searchAfter;
+
+          const response = await fetchDownloadJson(searchUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const hits = (response && response.hits && response.hits.hits) || [];
+          if (records.length === 0) totalPossible = getTotalHitsValue(response);
+          if (!hits.length) break;
+
+          hits.forEach((hit) => records.push((hit && hit._source) || {}));
+          const loaded = records.length.toLocaleString();
+          const totalLabel = totalPossible == null ? `${limit.toLocaleString()} maximum` : `${Math.min(totalPossible, limit).toLocaleString()} requested`;
+          const percentBase = totalPossible ? Math.min(records.length / Math.min(totalPossible, limit), 1) : Math.min(records.length / limit, 1);
+          setDownloadStatus("Collecting records", `Loaded ${loaded} records (${totalLabel}).`, {
+            percent: 12 + (percentBase * 58),
+          });
+
+          const lastHit = hits[hits.length - 1];
+          searchAfter = lastHit && lastHit.sort;
+          if (!searchAfter || hits.length < pageSize) break;
         }
 
-        const reader = response.body.getReader();
-        const chunks = [];
-        let receivedBytes = 0;
+        return { records, totalPossible };
+      }
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          receivedBytes += value.length;
-          const percent = 20 + ((receivedBytes / contentLength) * 75);
-          setDownloadStatus(
-            "Receiving download",
-            `Received ${(receivedBytes / 1024 / 1024).toFixed(1)} MB of ${(contentLength / 1024 / 1024).toFixed(1)} MB.`,
-            { percent }
-          );
+      function deriveObservedMetadataUrl(record) {
+        const existingUrl = String((record && record.observedMetadataUrl) || "").trim();
+        if (existingUrl) return existingUrl;
+
+        const rawId = String((record && record.annotationID) || "").trim();
+        const sourceName = String((record && record.dataSource) || "");
+        const npnId = rawId.startsWith("npn:")
+          ? rawId.slice(4)
+          : (/^\d+$/.test(rawId) && /national phenology network/i.test(sourceName) ? rawId : "");
+
+        if (!npnId) return "";
+        return `https://services.usanpn.org/npn_portal/observations/getObservationById.json?request_src=PPO&observation_id=${encodeURIComponent(npnId)}&pretty=1`;
+      }
+
+      function enrichDownloadRecord(record) {
+        const enriched = { ...(record || {}) };
+        if (!String(enriched.observedMetadataUrl || "").trim()) {
+          const derivedUrl = deriveObservedMetadataUrl(enriched);
+          if (derivedUrl) enriched.observedMetadataUrl = derivedUrl;
         }
+        return enriched;
+      }
 
-        return new Blob(chunks, {
-          type: response.headers.get("Content-Type") || "application/zip",
+      function valueToCsvText(value) {
+        if (value == null) return "";
+        if (Array.isArray(value)) return value.map(valueToCsvText).join(",");
+        if (typeof value === "object") return JSON.stringify(value);
+        return String(value);
+      }
+
+      function escapeCsvValue(value) {
+        const text = valueToCsvText(value);
+        if (/[",\r\n]/.test(text)) {
+          return `"${text.replace(/"/g, '""')}"`;
+        }
+        return text;
+      }
+
+      function rowsWithValue(records, field) {
+        return records.reduce((count, record) => {
+          const value = record && record[field];
+          if (Array.isArray(value)) return count + (value.length ? 1 : 0);
+          if (value == null || String(value).trim() === "") return count;
+          return count + 1;
+        }, 0);
+      }
+
+      function csvFromRecords(records, mappedFields) {
+        const fields = mappedFields.slice();
+        const fieldSet = new Set(fields);
+        records.forEach((record) => {
+          Object.keys(record || {}).forEach((field) => {
+            if (fieldSet.has(field)) return;
+            fieldSet.add(field);
+            fields.push(field);
+          });
         });
+
+        const lines = [fields.map(escapeCsvValue).join(",")];
+        records.forEach((record) => {
+          lines.push(fields.map((field) => escapeCsvValue(record && record[field])).join(","));
+        });
+
+        return {
+          csv: `${lines.join("\n")}\n`,
+          fields,
+        };
+      }
+
+      function makeCrcTable() {
+        const table = new Uint32Array(256);
+        for (let i = 0; i < 256; i += 1) {
+          let c = i;
+          for (let k = 0; k < 8; k += 1) {
+            c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+          }
+          table[i] = c >>> 0;
+        }
+        return table;
+      }
+
+      function crc32(bytes) {
+        if (!downloadCrcTable) downloadCrcTable = makeCrcTable();
+        let crc = 0xffffffff;
+        for (let i = 0; i < bytes.length; i += 1) {
+          crc = downloadCrcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+        }
+        return (crc ^ 0xffffffff) >>> 0;
+      }
+
+      function dosDateTime(date = new Date()) {
+        const year = Math.max(1980, date.getFullYear());
+        return {
+          dosTime: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+          dosDate: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+        };
+      }
+
+      function makeHeader(size) {
+        const header = new Uint8Array(size);
+        return {
+          bytes: header,
+          view: new DataView(header.buffer),
+        };
+      }
+
+      function createZipBlob(entries) {
+        const encoder = new TextEncoder();
+        const localParts = [];
+        const centralParts = [];
+        let offset = 0;
+        const { dosDate, dosTime } = dosDateTime();
+
+        entries.forEach((entry) => {
+          const nameBytes = encoder.encode(entry.name);
+          const dataBytes = entry.data instanceof Uint8Array ? entry.data : encoder.encode(String(entry.data || ""));
+          const crc = crc32(dataBytes);
+
+          const local = makeHeader(30 + nameBytes.length);
+          local.view.setUint32(0, 0x04034b50, true);
+          local.view.setUint16(4, 20, true);
+          local.view.setUint16(6, 0, true);
+          local.view.setUint16(8, 0, true);
+          local.view.setUint16(10, dosTime, true);
+          local.view.setUint16(12, dosDate, true);
+          local.view.setUint32(14, crc, true);
+          local.view.setUint32(18, dataBytes.length, true);
+          local.view.setUint32(22, dataBytes.length, true);
+          local.view.setUint16(26, nameBytes.length, true);
+          local.view.setUint16(28, 0, true);
+          local.bytes.set(nameBytes, 30);
+          localParts.push(local.bytes, dataBytes);
+
+          const central = makeHeader(46 + nameBytes.length);
+          central.view.setUint32(0, 0x02014b50, true);
+          central.view.setUint16(4, 20, true);
+          central.view.setUint16(6, 20, true);
+          central.view.setUint16(8, 0, true);
+          central.view.setUint16(10, 0, true);
+          central.view.setUint16(12, dosTime, true);
+          central.view.setUint16(14, dosDate, true);
+          central.view.setUint32(16, crc, true);
+          central.view.setUint32(20, dataBytes.length, true);
+          central.view.setUint32(24, dataBytes.length, true);
+          central.view.setUint16(28, nameBytes.length, true);
+          central.view.setUint16(30, 0, true);
+          central.view.setUint16(32, 0, true);
+          central.view.setUint16(34, 0, true);
+          central.view.setUint16(36, 0, true);
+          central.view.setUint32(38, 0, true);
+          central.view.setUint32(42, offset, true);
+          central.bytes.set(nameBytes, 46);
+          centralParts.push(central.bytes);
+
+          offset += local.bytes.length + dataBytes.length;
+        });
+
+        const centralSize = centralParts.reduce((sum, bytes) => sum + bytes.length, 0);
+        const end = makeHeader(22);
+        end.view.setUint32(0, 0x06054b50, true);
+        end.view.setUint16(4, 0, true);
+        end.view.setUint16(6, 0, true);
+        end.view.setUint16(8, entries.length, true);
+        end.view.setUint16(10, entries.length, true);
+        end.view.setUint32(12, centralSize, true);
+        end.view.setUint32(16, offset, true);
+        end.view.setUint16(20, 0, true);
+
+        return new Blob([...localParts, ...centralParts, end.bytes], { type: "application/zip" });
+      }
+
+      function buildDownloadReadme({ query, limit, totalPossible, returned, fields, observedMetadataUrlRows }) {
+        return [
+          "The following contains information about your download from the Global Plant Phenology Database.",
+          "",
+          "data file = data.csv",
+          `date query ran = ${new Date().toString()}`,
+          `query = ${JSON.stringify(query)}`,
+          "fields returned = all mapped Phenobase fields",
+          `field count = ${fields.length}`,
+          "required field observedMetadataUrl included = yes",
+          `rows with observedMetadataUrl value = ${observedMetadataUrlRows}`,
+          `user specified limit = ${limit}`,
+          `total results possible = ${totalPossible == null ? "unknown" : totalPossible.toLocaleString()}`,
+          `total results returned = ${returned.toLocaleString()}`,
+          "",
+        ].join("\n");
+      }
+
+      function buildCitationText() {
+        return [
+          "Citation and data use policy",
+          "",
+          "Use of these data should cite Phenobase and the contributing source datasets represented in the download.",
+          "Review source-specific licensing and citation requirements before redistribution or publication.",
+          "",
+        ].join("\n");
+      }
+
+      async function createBrowserDownloadZip(signal) {
+        const query = getDownloadQuery();
+        const limit = CLIENT_DOWNLOAD_LIMIT;
+        const fields = await fetchDownloadFields(signal);
+        const { records, totalPossible } = await fetchDownloadRecords(query, limit, signal);
+        setDownloadStatus("Writing CSV", "Formatting records and deriving missing NPN metadata URLs.", { percent: 76 });
+        const enrichedRecords = records.map(enrichDownloadRecord);
+        const csvResult = csvFromRecords(enrichedRecords, fields);
+        const observedMetadataUrlRows = rowsWithValue(enrichedRecords, "observedMetadataUrl");
+        const readme = buildDownloadReadme({
+          query,
+          limit,
+          totalPossible,
+          returned: enrichedRecords.length,
+          fields: csvResult.fields,
+          observedMetadataUrlRows,
+        });
+
+        setDownloadStatus("Packaging ZIP", "Creating data.csv, README, and citation notes in your browser.", { percent: 88 });
+        return createZipBlob([
+          { name: "README.txt", data: readme },
+          { name: "citation_and_data_use_policies.txt", data: buildCitationText() },
+          { name: "data.csv", data: csvResult.csv },
+        ]);
       }
 
       async function startDownload($dialog) {
@@ -407,12 +698,7 @@
         startDownloadTimer();
 
         try {
-          const response = await fetch(downloadLink, { signal: activeDownloadAbort.signal });
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || `Download failed with status ${response.status}`);
-          }
-          const blob = await readDownloadResponse(response);
+          const blob = await createBrowserDownloadZip(activeDownloadAbort.signal);
           stopDownloadTimer();
           setDownloadStatus("Download started", "The ZIP has been sent to your browser. Check your downloads folder or browser download shelf.", {
             tone: "success",
