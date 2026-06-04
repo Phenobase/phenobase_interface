@@ -283,6 +283,7 @@
       let activeDownloadAbort = null;
       let downloadProgressTimer = null;
       let downloadStartedAt = 0;
+      let downloadPhase = "idle";
       const DOWNLOAD_MAPPING_URL = "https://biscicol.org/phenobase/api/v1/query//phenobase2/_mapping";
       const DOWNLOAD_PAGE_SIZE = 1000;
       const CLIENT_DOWNLOAD_LIMIT = 100000;
@@ -298,6 +299,7 @@
         $("#downloadProgress").prop("hidden", false).attr("aria-hidden", "false");
         $("#downloadProgressTitle").text(title || "Preparing download");
         $("#downloadProgressMessage").text(message || "");
+        if (options.phase) downloadPhase = options.phase;
         if (options.percent != null) setDownloadProgress(options.percent);
         $("#downloadProgress").toggleClass("is-error", options.tone === "error");
         $("#downloadProgress").toggleClass("is-success", options.tone === "success");
@@ -309,14 +311,16 @@
         const minutes = Math.floor(elapsedSeconds / 60);
         const seconds = elapsedSeconds % 60;
         const elapsedLabel = minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
-        let status = "Building the ZIP on the server. Large downloads can take a while before the browser save dialog appears.";
+        let status = "Preparing the export. Large downloads can take a while.";
         if (elapsedSeconds > 45) {
-          status = "Still working. The server is collecting records and writing the CSV; broad queries can take more than a minute.";
+          status = "Still working. Broad queries can take more than a minute.";
         } else if (elapsedSeconds > 15) {
           status = "Still preparing the file. Please keep this page open.";
         }
-        $("#downloadProgressMeta").text(`Elapsed: ${elapsedLabel}`);
-        $("#downloadProgressMessage").text(status);
+        $("#downloadProgressMeta").text(`Elapsed: ${elapsedLabel}. ${status}`);
+        if (downloadPhase !== "collecting") {
+          $("#downloadProgressMessage").text(status);
+        }
       }
 
       function startDownloadTimer() {
@@ -337,6 +341,7 @@
         stopDownloadTimer();
         downloadStartedAt = 0;
         activeDownloadAbort = null;
+        downloadPhase = "idle";
         $("#downloadProgress").prop("hidden", true).attr("aria-hidden", "true").removeClass("is-error is-success");
         $("#downloadProgressTitle").text("Preparing download");
         $("#downloadProgressMessage").text("Waiting to start.");
@@ -450,6 +455,7 @@
           const percentBase = totalPossible ? Math.min(records.length / Math.min(totalPossible, limit), 1) : Math.min(records.length / limit, 1);
           setDownloadStatus("Collecting records", `Loaded ${loaded} records (${totalLabel}).`, {
             percent: 12 + (percentBase * 58),
+            phase: "collecting",
           });
 
           const lastHit = hits[hits.length - 1];
@@ -664,7 +670,7 @@
         const limit = CLIENT_DOWNLOAD_LIMIT;
         const fields = await fetchDownloadFields(signal);
         const { records, totalPossible } = await fetchDownloadRecords(query, limit, signal);
-        setDownloadStatus("Writing CSV", "Formatting records and deriving missing NPN metadata URLs.", { percent: 76 });
+        setDownloadStatus("Writing CSV", "Formatting records and deriving missing NPN metadata URLs.", { percent: 76, phase: "writing" });
         const enrichedRecords = records.map(enrichDownloadRecord);
         const csvResult = csvFromRecords(enrichedRecords, fields);
         const observedMetadataUrlRows = rowsWithValue(enrichedRecords, "observedMetadataUrl");
@@ -677,7 +683,7 @@
           observedMetadataUrlRows,
         });
 
-        setDownloadStatus("Packaging ZIP", "Creating data.csv, README, and citation notes in your browser.", { percent: 88 });
+        setDownloadStatus("Packaging ZIP", "Creating data.csv, README, and citation notes in your browser.", { percent: 88, phase: "packaging" });
         return createZipBlob([
           { name: "README.txt", data: readme },
           { name: "citation_and_data_use_policies.txt", data: buildCitationText() },
@@ -694,7 +700,7 @@
 
         activeDownloadAbort = new AbortController();
         setDialogButtons($dialog, { hideDownload: true, cancelLabel: "Cancel" });
-        setDownloadStatus("Preparing download", "Submitting the export request. Please keep this page open.", { percent: 8 });
+        setDownloadStatus("Preparing download", "Submitting the export request. Please keep this page open.", { percent: 8, phase: "preparing" });
         startDownloadTimer();
 
         try {
