@@ -29,19 +29,26 @@ function removeDirectory(directory) {
     fs.rmdirSync(directory);
 }
 
-// Example of other tasks
-function defaultTask(cb) {
-    src('app/*')
-        .pipe(dest('public/'))
-        .on('end', function() {
-            src('app/trait-viz/lib/*')
-                .pipe(dest('public/trait-viz/lib/'))
-                .on('end', cb);
-        });
+function copyApp() {
+    return src('app/**/*', { encoding: false })
+        .pipe(dest('public/'));
+}
+
+function copyOptionalTraitVizLib(cb) {
+    const traitVizLib = 'app/trait-viz/lib';
+
+    if (!fs.existsSync(traitVizLib)) {
+        cb();
+        return;
+    }
+
+    src(`${traitVizLib}/**/*`, { encoding: false })
+        .pipe(dest('public/trait-viz/lib/'))
+        .on('end', cb)
+        .on('error', cb);
 }
 
 // Register tasks
 exports.clean = clean;
-exports.default = defaultTask;
-exports.build = series(clean, defaultTask);
-
+exports.default = series(copyApp, copyOptionalTraitVizLib);
+exports.build = series(clean, copyApp, copyOptionalTraitVizLib);
