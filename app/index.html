@@ -29,12 +29,29 @@
         <!-- Dynamic facets will be populated here -->
         <div class="facet-title-row">
           <div class="facet-title-with-info">
+            <div class="facet-title">Taxon</div>
+            <button type="button" class="filter-info-btn" data-info-target="helpTaxonSearch" aria-controls="helpTaxonSearch" aria-expanded="false" aria-label="Taxon search help">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="helpTaxonSearch" class="filter-help-popover" role="tooltip" hidden>Search by family, genus, or scientific name. Selecting a suggestion applies an exact taxon filter.</div>
+        </div>
+        <div class="search-container taxon-search-container">
+          <div class="taxon-search-input-row">
+            <input type="text" id="scientificNameSearch" placeholder="Scientific name, genus, or family" autocomplete="off" aria-autocomplete="list" aria-controls="taxonSuggestions" aria-expanded="false">
+            <button id="clearTaxonSearch" class="btn btn-default btn-xs" type="button">Clear</button>
+          </div>
+          <div id="taxonSuggestions" class="taxon-suggestions" role="listbox" aria-label="Taxon suggestions"></div>
+        </div>
+
+        <div class="facet-title-row">
+          <div class="facet-title-with-info">
             <div class="facet-title">Data Source</div>
             <button type="button" class="filter-info-btn" data-info-target="helpDataSource" aria-controls="helpDataSource" aria-expanded="false" aria-label="Data source filter help">
               <i class="fas fa-circle-info" aria-hidden="true"></i>
             </button>
           </div>
-          <div id="helpDataSource" class="filter-help-popover" role="tooltip" hidden>Filter by one or more record providers.</div>
+          <div id="helpDataSource" class="filter-help-popover" role="tooltip" hidden>Select one or more providers. All sources are included when no source is selected.</div>
         </div>
         <div id="dataSourceFacets"></div>
 
@@ -68,6 +85,7 @@
           <button id="traitModeAll" class="btn btn-default btn-sm" type="button">All traits</button>
         </div>
         <div id="traitModeWarning" class="text-warning filter-hint" style="display:none;"></div>
+        <p class="filter-help trait-count-note">Counts may include inferred parent traits from the PPO hierarchy and are not necessarily additive.</p>
         <div id="phenophaseFilters"></div>
         <div id="allTraitsFilters" style="display:none;"></div>
 
@@ -84,19 +102,20 @@
           <div id="yearRangeDisplay" class="filter-hint"></div>
           <div id="yearRangeSlider"></div>
           <div id="yearRangeMarks" class="decade-slider-marks" aria-hidden="true"></div>
-        </div>
-
-        <div class="facet-title-row">
-          <div class="facet-title-with-info">
-            <div class="facet-title">Search by Scientific Name</div>
-            <button type="button" class="filter-info-btn" data-info-target="helpScientificName" aria-controls="helpScientificName" aria-expanded="false" aria-label="Scientific name search help">
-              <i class="fas fa-circle-info" aria-hidden="true"></i>
-            </button>
-          </div>
-          <div id="helpScientificName" class="filter-help-popover" role="tooltip" hidden>Search by plant family, genus, or full scientific name.</div>
-        </div>
-        <div class="search-container">
-          <input type="text" id="scientificNameSearch" placeholder="Family, genus, or scientific name">
+          <details class="advanced-date-filter">
+            <summary>Advanced year filters</summary>
+            <div class="year-filter-grid">
+              <label class="filter-label" for="startYear">Start Year</label>
+              <input type="number" id="startYear" class="filter-input" inputmode="numeric" min="1500" max="2100" placeholder="Start">
+              <label class="filter-label" for="endYear">End Year</label>
+              <input type="number" id="endYear" class="filter-input" inputmode="numeric" min="1500" max="2100" placeholder="End">
+            </div>
+            <div class="year-filter-actions">
+              <button id="applyYearFilter" class="btn btn-default btn-xs" type="button">Apply years</button>
+              <button id="clearYearFilter" class="btn btn-default btn-xs" type="button">Clear years</button>
+            </div>
+            <div id="yearValidationMessage" class="filter-error" role="status" aria-live="polite"></div>
+          </details>
         </div>
 
         <div class="facet-title-row">
@@ -226,11 +245,18 @@
       <i class="fas fa-robot"></i>
     </div>
     <p>This service will initiate a download of up to 100,000 records from the Phenobase database.</p>
-    <p>Citation and data use policy is included with the download bundle.
-    <p>Counts from downloaded data use exact-match scientific-names whereas the queries on the interface use full-text 
-          matching which results in possibly fewer downloaded results than the UI query syntax may show.
-    </p>
+    <p>The ZIP includes data.csv, citation notes, and a README.</p>
+    <p>The CSV includes all mapped Phenobase fields. The observedMetadataUrl column is required and included even when some rows have blank values.</p>
+    <p>Downloads use the same active filters shown in the interface.</p>
     <p>Download may take up to 1 minute to commence.</p>
+    <div id="downloadProgress" class="download-progress" hidden>
+      <div class="download-progress-title" id="downloadProgressTitle">Preparing download</div>
+      <div class="download-progress-track" aria-hidden="true">
+        <div id="downloadProgressBar" class="download-progress-bar"></div>
+      </div>
+      <div class="download-progress-message" id="downloadProgressMessage">Waiting to start.</div>
+      <div class="download-progress-meta" id="downloadProgressMeta"></div>
+    </div>
   </div>
 
   <!-- Modal for displaying row details -->
@@ -254,11 +280,166 @@
   <script>
     $(document).ready(function () {
       //fetchResults(); // Assuming this function exists and fetches data
+      let activeDownloadAbort = null;
+      let downloadProgressTimer = null;
+      let downloadStartedAt = 0;
+
+      function setDownloadProgress(percent) {
+        const safePercent = Math.max(0, Math.min(100, Math.round(percent || 0)));
+        $("#downloadProgressBar").css("width", `${safePercent}%`);
+      }
+
+      function setDownloadStatus(title, message, options = {}) {
+        $("#downloadProgress").prop("hidden", false).attr("aria-hidden", "false");
+        $("#downloadProgressTitle").text(title || "Preparing download");
+        $("#downloadProgressMessage").text(message || "");
+        if (options.percent != null) setDownloadProgress(options.percent);
+        $("#downloadProgress").toggleClass("is-error", options.tone === "error");
+        $("#downloadProgress").toggleClass("is-success", options.tone === "success");
+      }
+
+      function updateDownloadElapsed() {
+        if (!downloadStartedAt) return;
+        const elapsedSeconds = Math.floor((Date.now() - downloadStartedAt) / 1000);
+        const minutes = Math.floor(elapsedSeconds / 60);
+        const seconds = elapsedSeconds % 60;
+        const elapsedLabel = minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        let status = "Building the ZIP on the server. Large downloads can take a while before the browser save dialog appears.";
+        if (elapsedSeconds > 45) {
+          status = "Still working. The server is collecting records and writing the CSV; broad queries can take more than a minute.";
+        } else if (elapsedSeconds > 15) {
+          status = "Still preparing the file. Please keep this page open.";
+        }
+        $("#downloadProgressMeta").text(`Elapsed: ${elapsedLabel}`);
+        $("#downloadProgressMessage").text(status);
+      }
+
+      function startDownloadTimer() {
+        stopDownloadTimer();
+        downloadStartedAt = Date.now();
+        $("#downloadProgressMeta").text("Elapsed: 0s");
+        downloadProgressTimer = window.setInterval(updateDownloadElapsed, 1000);
+      }
+
+      function stopDownloadTimer() {
+        if (downloadProgressTimer) {
+          window.clearInterval(downloadProgressTimer);
+          downloadProgressTimer = null;
+        }
+      }
+
+      function resetDownloadProgress() {
+        stopDownloadTimer();
+        downloadStartedAt = 0;
+        activeDownloadAbort = null;
+        $("#downloadProgress").prop("hidden", true).attr("aria-hidden", "true").removeClass("is-error is-success");
+        $("#downloadProgressTitle").text("Preparing download");
+        $("#downloadProgressMessage").text("Waiting to start.");
+        $("#downloadProgressMeta").text("");
+        setDownloadProgress(0);
+      }
+
+      function setDialogButtons($dialog, state) {
+        const $buttons = $dialog.dialog("widget").find(".ui-dialog-buttonpane button");
+        $buttons.each(function () {
+          const $button = $(this);
+          const label = $button.text();
+          if (label === "Download") {
+            $button.toggle(!state.hideDownload);
+            $button.prop("disabled", !!state.downloadDisabled);
+          } else {
+            $button.text(state.cancelLabel || "Cancel");
+            $button.prop("disabled", !!state.cancelDisabled);
+          }
+        });
+      }
+
+      function triggerBrowserDownload(blob) {
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = "phenobase_data.zip";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+      }
+
+      async function readDownloadResponse(response) {
+        const contentLength = Number(response.headers.get("Content-Length") || 0);
+        if (!response.body || !Number.isFinite(contentLength) || contentLength <= 0) {
+          setDownloadStatus("Download package ready", "Receiving ZIP from the server.", { percent: 80 });
+          return response.blob();
+        }
+
+        const reader = response.body.getReader();
+        const chunks = [];
+        let receivedBytes = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          receivedBytes += value.length;
+          const percent = 20 + ((receivedBytes / contentLength) * 75);
+          setDownloadStatus(
+            "Receiving download",
+            `Received ${(receivedBytes / 1024 / 1024).toFixed(1)} MB of ${(contentLength / 1024 / 1024).toFixed(1)} MB.`,
+            { percent }
+          );
+        }
+
+        return new Blob(chunks, {
+          type: response.headers.get("Content-Type") || "application/zip",
+        });
+      }
+
+      async function startDownload($dialog) {
+        updateDownloadLink();
+        if (!downloadLink) {
+          setDownloadStatus("Download unavailable", "No download link is available for the current filters.", { tone: "error", percent: 0 });
+          return;
+        }
+
+        activeDownloadAbort = new AbortController();
+        setDialogButtons($dialog, { hideDownload: true, cancelLabel: "Cancel" });
+        setDownloadStatus("Preparing download", "Submitting the export request. Please keep this page open.", { percent: 8 });
+        startDownloadTimer();
+
+        try {
+          const response = await fetch(downloadLink, { signal: activeDownloadAbort.signal });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || `Download failed with status ${response.status}`);
+          }
+          const blob = await readDownloadResponse(response);
+          stopDownloadTimer();
+          setDownloadStatus("Download started", "The ZIP has been sent to your browser. Check your downloads folder or browser download shelf.", {
+            tone: "success",
+            percent: 100,
+          });
+          triggerBrowserDownload(blob);
+          setDialogButtons($dialog, { hideDownload: true, cancelLabel: "Close" });
+          activeDownloadAbort = null;
+        } catch (error) {
+          stopDownloadTimer();
+          if (error && error.name === "AbortError") {
+            setDownloadStatus("Download canceled", "The download request was canceled before the ZIP was ready.", { percent: 0 });
+          } else {
+            console.error("Download failed:", error);
+            setDownloadStatus("Download failed", "The ZIP could not be prepared. Try narrowing the query or retrying after a moment.", {
+              tone: "error",
+              percent: 0,
+            });
+          }
+          setDialogButtons($dialog, { hideDownload: false, downloadDisabled: false, cancelLabel: "Close" });
+          activeDownloadAbort = null;
+        }
+      }
 
       $("#downloadButton").click(function (event) {
         event.preventDefault(); // Prevent the default action initially
         updateDownloadLink(); // Update the download link
-        console.log(downloadLink);
 
         if (!downloadLink) {
           alert("No download link available.");
@@ -267,29 +448,39 @@
 
         // Start the spinner
         $("#spinner").show();
+        resetDownloadProgress();
 
         // Open the human verification dialog
         $("#humanCheckDialog").dialog({
           modal: true,
+          width: 520,
           buttons: {
             "Download": function () {
-              // Close the dialog
-              $(this).dialog("close");
-
-              // Stop the spinner
+              const $dialog = $(this);
               $("#spinner").hide();
-
-              // Initiate the download
-              window.location.href = downloadLink; // Replace with your download link variable
+              startDownload($dialog);
             },
             Cancel: function () {
-              // Close the dialog and stop spinner if canceled
+              if (activeDownloadAbort) {
+                activeDownloadAbort.abort();
+                activeDownloadAbort = null;
+              }
+              stopDownloadTimer();
               $(this).dialog("close");
               $("#spinner").hide();
             },
           },
+          close: function () {
+            if (activeDownloadAbort) {
+              activeDownloadAbort.abort();
+              activeDownloadAbort = null;
+            }
+            stopDownloadTimer();
+            $("#spinner").hide();
+          },
           open: function () {
             $(".ui-dialog-titlebar-close").hide(); // Optionally hide the close button to force user interaction
+            setDialogButtons($(this), { hideDownload: false, downloadDisabled: false, cancelLabel: "Cancel" });
           }
         });
       });

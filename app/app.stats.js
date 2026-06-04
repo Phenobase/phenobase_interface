@@ -5,6 +5,7 @@ const STATS_MAX_DOY = 366;
 const STATS_MAX_TRAIT_BUCKETS = 24;
 const STATS_DOY_BIN_INTERVAL = 7;
 const STATS_TRAIT_HIERARCHY_URL = "https://raw.githubusercontent.com/Phenobase/phenobase_data/version2/data/traits.csv";
+const PPO_INFERENCE_COUNT_NOTE = "Counts may include inferred parent traits from the PPO hierarchy and are not necessarily additive.";
 const statsCharts = [];
 let phenologyBoxPlotPluginRegistered = false;
 let statsDecadeHistogramPluginRegistered = false;
@@ -1281,7 +1282,7 @@ function renderTraitDecadeCharts(aggregations) {
   const note = document.createElement("p");
   note.className = "stats-note";
   const traitNote = window.lastStatsMeta?.traitNote ? ` ${window.lastStatsMeta.traitNote}` : "";
-  note.textContent = `Each chart shows one selected trait. Boxes use ${STATS_DOY_BIN_INTERVAL}-day day-of-year bins; the line inside each box is the median, and whiskers follow the Tukey box-plot rule to the nearest non-outlier bin in each decade.${traitNote}`;
+  note.textContent = `Each chart shows one selected trait. Boxes use ${STATS_DOY_BIN_INTERVAL}-day day-of-year bins; the line inside each box is the median, and whiskers follow the Tukey box-plot rule to the nearest non-outlier bin in each decade. ${PPO_INFERENCE_COUNT_NOTE}${traitNote}`;
   container.appendChild(note);
 
   if (typeof Chart !== "function") {
@@ -1371,7 +1372,7 @@ function renderTraitDecadeCharts(aggregations) {
 
     const traitMeta = document.createElement("div");
     traitMeta.className = "trait-decade-meta";
-    traitMeta.textContent = `${bucket.doc_count.toLocaleString()} total record${bucket.doc_count === 1 ? "" : "s"} • ${bucket.doy_records.doc_count.toLocaleString()} with day of year`;
+    traitMeta.textContent = `${bucket.doc_count.toLocaleString()} total observation${bucket.doc_count === 1 ? "" : "s"} • ${bucket.doy_records.doc_count.toLocaleString()} with day of year`;
     header.appendChild(traitMeta);
 
     card.appendChild(header);
@@ -1515,8 +1516,8 @@ function renderMappedTraitsSection(aggregations, options = {}) {
 
   if (summaryOnly) {
     note.textContent = hasTraitSelection || hasPhenophaseSelection
-      ? "No mapped-trait charts are shown for the current filters. Select one or more traits in the sidebar, then refresh Stats, to see the day-of-year box plots. If you only use phenophase filters, this section shows a phenophase presence summary instead."
-      : "Select one or more traits in the sidebar, then refresh Stats, to see the mapped-trait day-of-year charts. When no traits are selected, this section shows a phenophase presence summary instead.";
+      ? `No mapped-trait charts are shown for the current filters. Select one or more traits in the sidebar, then refresh Stats, to see the day-of-year box plots. If you only use phenophase filters, this section shows a phenophase presence summary instead. ${PPO_INFERENCE_COUNT_NOTE}`
+      : `Select one or more traits in the sidebar, then refresh Stats, to see the mapped-trait day-of-year charts. When no traits are selected, this section shows a phenophase presence summary instead. ${PPO_INFERENCE_COUNT_NOTE}`;
     container.appendChild(note);
 
     const buckets = aggregations?.phenophasePresenceSummary_4?.buckets || {};
@@ -1541,7 +1542,7 @@ function renderMappedTraitsSection(aggregations, options = {}) {
 
     const table = document.createElement("table");
     table.classList.add("table", "table-striped");
-    table.appendChild(buildStatsTableHead(["Phenophase", "Present", "Absent", "Total"]));
+    table.appendChild(buildStatsTableHead(["Phenophase", "Present Observations", "Absent Observations", "Total Observations"]));
     table.appendChild(buildStatsTableBody(rows.map((row) => [
       row.label,
       row.present.toLocaleString(),
@@ -1552,7 +1553,7 @@ function renderMappedTraitsSection(aggregations, options = {}) {
     return;
   }
 
-  note.textContent = `Each chart shows one selected trait. Boxes use ${STATS_DOY_BIN_INTERVAL}-day day-of-year bins; the line inside each box is the median, and whiskers follow the Tukey box-plot rule to the nearest non-outlier bin in each decade.${traitNote}`;
+  note.textContent = `Each chart shows one selected trait. Boxes use ${STATS_DOY_BIN_INTERVAL}-day day-of-year bins; the line inside each box is the median, and whiskers follow the Tukey box-plot rule to the nearest non-outlier bin in each decade. ${PPO_INFERENCE_COUNT_NOTE}${traitNote}`;
   container.appendChild(note);
 
   if (typeof Chart !== "function") {
@@ -1642,7 +1643,7 @@ function renderMappedTraitsSection(aggregations, options = {}) {
 
     const traitMeta = document.createElement("div");
     traitMeta.className = "trait-decade-meta";
-    traitMeta.textContent = `${bucket.doc_count.toLocaleString()} total record${bucket.doc_count === 1 ? "" : "s"} • ${bucket.doy_records.doc_count.toLocaleString()} with day of year`;
+    traitMeta.textContent = `${bucket.doc_count.toLocaleString()} total observation${bucket.doc_count === 1 ? "" : "s"} • ${bucket.doy_records.doc_count.toLocaleString()} with day of year`;
     header.appendChild(traitMeta);
 
     card.appendChild(header);
@@ -1799,7 +1800,7 @@ function renderDatasourceDistribution(buckets) {
 
 async function renderCachedDatasourceIfAvailable() {
   if (window.currentMainTab !== "stats") return false;
-  if (!statsLoadState.loading && statsLoadState.completed) return false;
+  if (!statsLoadState.loading) return false;
 
   const cachedDatasource = getCachedStatsDatasourceAggregation();
   if (!cachedDatasource?.buckets) return false;
@@ -1811,7 +1812,7 @@ async function renderCachedDatasourceIfAvailable() {
 
 async function renderCachedStatsOverviewIfAvailable() {
   if (window.currentMainTab !== "stats") return false;
-  if (!statsLoadState.loading && statsLoadState.completed) return false;
+  if (!statsLoadState.loading) return false;
 
   const cachedAggregations = getCachedStatsOverviewAggregations();
   if (!cachedAggregations) return renderCachedDatasourceIfAvailable();

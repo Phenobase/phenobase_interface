@@ -217,6 +217,13 @@
   transform: rotate(45deg);
 }
 
+.filter-help {
+  margin: 6px 0 4px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .facet-link {
   display: block;
   margin-bottom: 10px;
@@ -349,6 +356,88 @@
   width: 100%;
   padding: 8px;
   font-size: 16px;
+}
+
+.taxon-search-container {
+  position: relative;
+  margin-top: 6px;
+}
+
+.taxon-search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.taxon-search-input-row #scientificNameSearch {
+  min-width: 0;
+}
+
+#clearTaxonSearch {
+  flex: 0 0 auto;
+}
+
+.taxon-suggestions {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #c8d5df;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+}
+
+.taxon-suggestions.is-visible {
+  display: block;
+}
+
+.taxon-suggestion {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #edf2f7;
+  background: #fff;
+  color: #1f2937;
+  text-align: left;
+}
+
+.taxon-suggestion:last-child {
+  border-bottom: 0;
+}
+
+.taxon-suggestion:hover,
+.taxon-suggestion.is-active {
+  background: #eaf4fb;
+}
+
+.taxon-suggestion-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.taxon-suggestion-rank {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.taxon-suggestion-empty {
+  padding: 9px 10px;
+  color: #64748b;
+  font-size: 13px;
 }
 
 /* Ensure the HTML and body take up the full height of the viewport */
@@ -497,6 +586,69 @@ html, body {
 #humanCheckDialog p {
   font-size: 14px;
   margin: 10px 0;
+}
+
+.download-progress {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #c8d5df;
+  border-radius: 6px;
+  background: #f8fafc;
+  text-align: left;
+}
+
+.download-progress-title {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.download-progress-track {
+  height: 8px;
+  margin: 9px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.download-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 0.2s ease;
+}
+
+.download-progress-message,
+.download-progress-meta {
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.download-progress-meta {
+  margin-top: 4px;
+}
+
+.download-progress.is-success {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.download-progress.is-success .download-progress-bar {
+  background: #16a34a;
+}
+
+.download-progress.is-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.download-progress.is-error .download-progress-title {
+  color: #991b1b;
+}
+
+.download-progress.is-error .download-progress-bar {
+  background: #dc2626;
 }
 .ui-dialog-titlebar-close {
   display: none; /* Hide the close button */
@@ -747,6 +899,43 @@ html, body { color: #000 !important; background: #fff; }
   margin-top: 6px;
 }
 
+.advanced-date-filter {
+  margin-top: 10px;
+}
+
+.advanced-date-filter summary {
+  color: #337ab7;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.year-filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+  margin-top: 8px;
+}
+
+.year-filter-grid .filter-label {
+  margin: 0;
+}
+
+.year-filter-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.filter-error {
+  min-height: 16px;
+  margin-top: 6px;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 #yearRangeSlider {
   margin: 10px 8px 8px;
 }
@@ -902,6 +1091,11 @@ html, body { color: #000 !important; background: #fff; }
 .trait-mode-toggle .btn.active {
   border-color: #337ab7;
   font-weight: 700;
+}
+
+.trait-count-note {
+  margin-top: 6px;
+  margin-bottom: 6px;
 }
 
 #allTraitsFilters {

@@ -21,8 +21,11 @@
   const URL_FILTER_STATE_ENABLED = window.phenobaseEnableUrlFilterState === true;
   const PORTAL_URL_PARAM_KEYS = [
     'scientificName',
+    'taxonField',
     'decadeStart',
     'decadeEnd',
+    'startYear',
+    'endYear',
     'presenceMode',
     'traitMode',
     'dataSource',
@@ -75,6 +78,8 @@
     presenceMode: 'both',
     decadeStart: DEFAULT_FILTER_DECADE_START,
     decadeEnd: MAX_DECADE_START,
+    startYear: null,
+    endYear: null,
     selectedPhenophases: [],
     geoBounds: null,
     traitMode: 'simple',
@@ -141,6 +146,39 @@
     return String(v || '').trim().toLowerCase();
   }
 
+  function normalizeExplicitYear(value) {
+    if (value == null || String(value).trim() === '') return null;
+    const year = Number(String(value).trim());
+    if (!Number.isInteger(year)) return null;
+    if (year < SELECTOR_MIN_YEAR || year > CURRENT_YEAR) return null;
+    return year;
+  }
+
+  function hasExplicitYearRange() {
+    return normalizeExplicitYear(portalFilters.startYear) != null
+      || normalizeExplicitYear(portalFilters.endYear) != null;
+  }
+
+  function getExplicitYearRange() {
+    const startYear = normalizeExplicitYear(portalFilters.startYear);
+    const endYear = normalizeExplicitYear(portalFilters.endYear);
+    if (startYear == null && endYear == null) return null;
+
+    const range = {};
+    if (startYear != null) range.gte = startYear;
+    if (endYear != null) range.lte = endYear;
+    return range;
+  }
+
+  function explicitYearSelectionLabel() {
+    const startYear = normalizeExplicitYear(portalFilters.startYear);
+    const endYear = normalizeExplicitYear(portalFilters.endYear);
+    if (startYear != null && endYear != null) return `${startYear}-${endYear}`;
+    if (startYear != null) return `${startYear}+`;
+    if (endYear != null) return `through ${endYear}`;
+    return '';
+  }
+
   function isPre1960DecadeStart(decadeStart) {
     return Number(decadeStart) === PRE_1960_DECADE_START;
   }
@@ -162,6 +200,8 @@
       presenceMode: String(source?.presenceMode || 'both').toLowerCase(),
       decadeStart: clampDecadeStart(source?.decadeStart, DEFAULT_FILTER_DECADE_START),
       decadeEnd: clampDecadeStart(source?.decadeEnd, MAX_DECADE_START),
+      startYear: normalizeExplicitYear(source?.startYear),
+      endYear: normalizeExplicitYear(source?.endYear),
       selectedPhenophases: toArray(source?.selectedPhenophases)
         .map((value) => normalizeLower(value))
         .filter(Boolean),
@@ -180,11 +220,28 @@
       selectedFacets: cloneSelectedFacetsState(window.selectedFacets || {}),
       portalFilters: clonePortalFilterState(portalFilters),
       scientificName: String(window.scientificNameSearchText || '').trim(),
+      taxonField: String(window.taxonFilter?.field || '').trim(),
     };
   }
 
-  function buildScientificFilterForText(searchText) {
-    if (!searchText) return null;
+  function buildTaxonSuggestionFromState(searchText, field) {
+    const value = String(searchText || '').trim();
+    if (!value) return null;
+    const normalizedField = String(field || 'scientificName').trim() || 'scientificName';
+    return {
+      label: value,
+      value,
+      field: normalizedField,
+      rank: normalizedField === 'scientificName' ? 'species' : normalizedField,
+    };
+  }
+
+  function buildScientificFilterForText(searchText, field) {
+    const suggestion = buildTaxonSuggestionFromState(searchText, field);
+    if (!suggestion) return null;
+    if (typeof window.buildTaxonFilterFromSuggestion === 'function') {
+      return window.buildTaxonFilterFromSuggestion(suggestion);
+    }
     if (typeof window.buildScientificSearchFilter === 'function') {
       return window.buildScientificSearchFilter(searchText);
     }
@@ -240,19 +297,30 @@
     portalFilters.presenceMode = nextPortalFilters.presenceMode;
     portalFilters.decadeStart = nextPortalFilters.decadeStart;
     portalFilters.decadeEnd = nextPortalFilters.decadeEnd;
+    portalFilters.startYear = nextPortalFilters.startYear;
+    portalFilters.endYear = nextPortalFilters.endYear;
     portalFilters.selectedPhenophases = nextPortalFilters.selectedPhenophases.slice();
     portalFilters.geoBounds = nextPortalFilters.geoBounds ? { ...nextPortalFilters.geoBounds } : null;
     portalFilters.traitMode = nextPortalFilters.traitMode;
 
     const scientificName = String(nextState.scientificName || '').trim();
-    window.scientificNameSearchText = scientificName;
-    if (typeof scientificNameSearchText !== 'undefined') scientificNameSearchText = scientificName;
+    const taxonField = String(nextState.taxonField || 'scientificName').trim() || 'scientificName';
+    const taxonSuggestion = buildTaxonSuggestionFromState(scientificName, taxonField);
+    if (taxonSuggestion && typeof window.setTaxonFilter === 'function') {
+      window.setTaxonFilter(taxonSuggestion);
+    } else if (typeof window.clearTaxonFilter === 'function') {
+      window.clearTaxonFilter();
+    } else {
+      window.scientificNameSearchText = scientificName;
+      if (typeof scientificNameSearchText !== 'undefined') scientificNameSearchText = scientificName;
+      window.taxonFilter = taxonSuggestion;
 
-    const builtScientificFilter = buildScientificFilterForText(scientificName);
-    window.scientificNameFilter = builtScientificFilter;
-    if (typeof scientificNameFilter !== 'undefined') scientificNameFilter = builtScientificFilter;
+      const builtScientificFilter = buildScientificFilterForText(scientificName, taxonField);
+      window.scientificNameFilter = builtScientificFilter;
+      if (typeof scientificNameFilter !== 'undefined') scientificNameFilter = builtScientificFilter;
 
-    if ($('#scientificNameSearch').length) $('#scientificNameSearch').val(scientificName);
+      if ($('#scientificNameSearch').length) $('#scientificNameSearch').val(scientificName);
+    }
   }
 
   function resetPaging() {
@@ -294,7 +362,7 @@
       window.markMapNeedsRender();
     }
 
-    const activeTab = String(window.currentMainTab || 'stats').toLowerCase();
+    const activeTab = String(window.currentMainTab || 'table').toLowerCase();
     if (activeTab === 'table') {
       if (typeof window.fetchFacetData === 'function') {
         window.fetchFacetData({
@@ -385,6 +453,7 @@
   }
 
   function isFullDecadeRange() {
+    if (hasExplicitYearRange()) return false;
     const r = getDecadeRangeFromState();
     return r.decadeStart === PRE_1960_DECADE_START && r.decadeEnd >= MAX_DECADE_START;
   }
@@ -447,15 +516,27 @@
     const bounds = normalizeGeoBounds(portalFilters.geoBounds) || normalizeGeoBounds(fullEarthBounds());
     const selectedFacetsState = window.selectedFacets || {};
     const scientificName = String(window.scientificNameSearchText || '').trim();
+    const taxonField = String(window.taxonFilter?.field || '').trim();
+    const explicitStartYear = normalizeExplicitYear(portalFilters.startYear);
+    const explicitEndYear = normalizeExplicitYear(portalFilters.endYear);
     const effectiveDataSources = toArray(selectedFacetsState.dataSource).length
       ? toArray(selectedFacetsState.dataSource)
       : availableDataSources;
 
-    if (scientificName) params.set('scientificName', scientificName);
-    else params.delete('scientificName');
+    if (scientificName) {
+      params.set('scientificName', scientificName);
+      params.set('taxonField', taxonField || 'scientificName');
+    } else {
+      params.delete('scientificName');
+      params.delete('taxonField');
+    }
 
     params.set('decadeStart', String(selection.decadeStart));
     params.set('decadeEnd', String(selection.decadeEnd));
+    if (explicitStartYear != null) params.set('startYear', String(explicitStartYear));
+    else params.delete('startYear');
+    if (explicitEndYear != null) params.set('endYear', String(explicitEndYear));
+    else params.delete('endYear');
 
     params.set('presenceMode', String(portalFilters.presenceMode || 'both'));
 
@@ -486,6 +567,7 @@
     const params = new URLSearchParams(window.location.search);
     const selectedFromUrl = {};
     const scientificName = String(params.get('scientificName') || '').trim();
+    const taxonField = String(params.get('taxonField') || 'scientificName').trim() || 'scientificName';
     const dataSources = params.getAll('dataSource').filter(Boolean);
     const mappedTraits = params.getAll('mappedTrait').filter(Boolean);
     const phenophases = params.getAll('phenophase').filter(Boolean);
@@ -499,13 +581,17 @@
     selectedFacets = window.selectedFacets;
 
     if (scientificName) {
-      const builtScientificFilter = window.buildScientificSearchFilter
-        ? window.buildScientificSearchFilter(scientificName)
-        : null;
-      window.scientificNameSearchText = scientificName;
-      window.scientificNameFilter = builtScientificFilter;
-      if (typeof scientificNameFilter !== 'undefined') scientificNameFilter = builtScientificFilter;
-      if ($('#scientificNameSearch').length) $('#scientificNameSearch').val(scientificName);
+      const taxonSuggestion = buildTaxonSuggestionFromState(scientificName, taxonField);
+      const builtScientificFilter = buildScientificFilterForText(scientificName, taxonField);
+      if (taxonSuggestion && typeof window.setTaxonFilter === 'function') {
+        window.setTaxonFilter(taxonSuggestion);
+      } else {
+        window.scientificNameSearchText = scientificName;
+        window.taxonFilter = taxonSuggestion;
+        window.scientificNameFilter = builtScientificFilter;
+        if (typeof scientificNameFilter !== 'undefined') scientificNameFilter = builtScientificFilter;
+        if ($('#scientificNameSearch').length) $('#scientificNameSearch').val(scientificName);
+      }
     }
 
     if (presenceMode === 'present' || presenceMode === 'absent' || presenceMode === 'both') {
@@ -526,6 +612,21 @@
     }
 
     portalFilters.selectedPhenophases = phenophases;
+    const startYear = normalizeExplicitYear(params.get('startYear'));
+    const endYear = normalizeExplicitYear(params.get('endYear'));
+    if (startYear != null && endYear != null && startYear <= endYear) {
+      portalFilters.startYear = startYear;
+      portalFilters.endYear = endYear;
+    } else if (startYear != null && endYear == null) {
+      portalFilters.startYear = startYear;
+      portalFilters.endYear = null;
+    } else if (startYear == null && endYear != null) {
+      portalFilters.startYear = null;
+      portalFilters.endYear = endYear;
+    } else {
+      portalFilters.startYear = null;
+      portalFilters.endYear = null;
+    }
     const urlDecadeStart = readOptionalDecadeParam('decadeStart');
     const urlDecadeEnd = readOptionalDecadeParam('decadeEnd');
     if (urlDecadeStart != null) portalFilters.decadeStart = urlDecadeStart;
@@ -552,6 +653,10 @@
   function updateYearRangeDisplay() {
     const el = document.getElementById('yearRangeDisplay');
     if (!el) return;
+    if (hasExplicitYearRange()) {
+      el.textContent = `Selected: ${explicitYearSelectionLabel()} (year filter)`;
+      return;
+    }
     const selection = getDecadeRangeFromState();
     const suffix = isFullDecadeRange() ? ' (all decades)' : '';
     el.textContent = `Selected: ${decadeSelectionLabel(selection)}${suffix}`;
@@ -732,7 +837,7 @@
 
     const nameSearchText = String(window.scientificNameSearchText || '').trim();
     if (nameSearchText) {
-      parts.push(`Name: ${nameSearchText}`);
+      parts.push(`Taxon: ${nameSearchText}`);
     }
 
     Object.entries(selectedFacets).forEach(([field, values]) => {
@@ -742,7 +847,9 @@
       parts.push(`${fieldLabel}: ${formatList(normalized, 2)}`);
     });
 
-    if (!isFullDecadeRange()) {
+    if (hasExplicitYearRange()) {
+      parts.push(`Year: ${explicitYearSelectionLabel()}`);
+    } else if (!isFullDecadeRange()) {
       const selection = getDecadeRangeFromState();
       parts.push(`Decade: ${decadeSelectionLabel(selection)}`);
     }
@@ -803,6 +910,11 @@
   }
 
   function buildDateRangeClause() {
+    const explicitRange = getExplicitYearRange();
+    if (explicitRange) {
+      return { range: { year: explicitRange } };
+    }
+
     const selection = getDecadeRangeFromState();
     const range = { gte: selection.decadeStart };
     if (isPre1960DecadeStart(selection.decadeStart) && isPre1960DecadeStart(selection.decadeEnd)) {
@@ -1124,6 +1236,49 @@
     }).join('');
   }
 
+  function setYearValidationMessage(message) {
+    const el = document.getElementById('yearValidationMessage');
+    if (!el) return;
+    el.textContent = message || '';
+  }
+
+  function validateYearInputs() {
+    const rawStart = String($('#startYear').val() || '').trim();
+    const rawEnd = String($('#endYear').val() || '').trim();
+
+    function parseInput(raw, label) {
+      if (!raw) return { value: null };
+      const value = Number(raw);
+      if (!Number.isInteger(value)) {
+        return { error: `${label} must be a whole year.` };
+      }
+      if (value < SELECTOR_MIN_YEAR || value > CURRENT_YEAR) {
+        return { error: `${label} must be between ${SELECTOR_MIN_YEAR} and ${CURRENT_YEAR}.` };
+      }
+      return { value };
+    }
+
+    const start = parseInput(rawStart, 'Start year');
+    if (start.error) return { valid: false, message: start.error };
+
+    const end = parseInput(rawEnd, 'End year');
+    if (end.error) return { valid: false, message: end.error };
+
+    if (start.value != null && end.value != null && start.value > end.value) {
+      return {
+        valid: false,
+        message: 'Start year must be before or equal to end year.',
+      };
+    }
+
+    return {
+      valid: true,
+      startYear: start.value,
+      endYear: end.value,
+      message: '',
+    };
+  }
+
   function syncUiFromState() {
     const bounds = normalizeGeoBounds(portalFilters.geoBounds);
     const hint = document.getElementById('geoFilterHint');
@@ -1146,6 +1301,9 @@
     updateYearRangeDisplay();
     renderDecadeMarks();
     updateDecadeSliderAccessibility();
+    if ($('#startYear').length) $('#startYear').val(portalFilters.startYear != null ? String(portalFilters.startYear) : '');
+    if ($('#endYear').length) $('#endYear').val(portalFilters.endYear != null ? String(portalFilters.endYear) : '');
+    setYearValidationMessage('');
 
     updateTraitModeUi();
     renderPhenophaseFilters();
@@ -1156,6 +1314,8 @@
   function resetCustomFilters() {
     portalFilters.decadeStart = DEFAULT_FILTER_DECADE_START;
     portalFilters.decadeEnd = MAX_DECADE_START;
+    portalFilters.startYear = null;
+    portalFilters.endYear = null;
     portalFilters.presenceMode = 'both';
     portalFilters.selectedPhenophases = [];
     portalFilters.geoBounds = null;
@@ -1214,6 +1374,9 @@
     const $applyFilters = $('#applyFiltersButton');
     const $clearAllFilters = $('#clearAllFiltersButton');
     const $resetDraft = $('#resetDraftFiltersButton');
+    const $applyYearFilter = $('#applyYearFilter');
+    const $clearYearFilter = $('#clearYearFilter');
+    const $yearInputs = $('#startYear, #endYear');
 
     window.onMapBBoxSelected = function (bounds) {
       portalFilters.geoBounds = normalizeGeoBounds(bounds);
@@ -1229,6 +1392,37 @@
     };
 
     initializeYearSlider();
+
+    $applyYearFilter.on('click', function () {
+      const result = validateYearInputs();
+      if (!result.valid) {
+        setYearValidationMessage(result.message);
+        return;
+      }
+      portalFilters.startYear = result.startYear;
+      portalFilters.endYear = result.endYear;
+      setYearValidationMessage('');
+      syncUiFromState();
+      markFiltersPending();
+    });
+
+    $clearYearFilter.on('click', function () {
+      portalFilters.startYear = null;
+      portalFilters.endYear = null;
+      setYearValidationMessage('');
+      syncUiFromState();
+      markFiltersPending();
+    });
+
+    $yearInputs.on('keydown', function (event) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      $applyYearFilter.trigger('click');
+    });
+
+    $yearInputs.on('input', function () {
+      setYearValidationMessage('');
+    });
 
     $(document).off('click', '.filter-info-btn').on('click', '.filter-info-btn', function (event) {
       event.preventDefault();
@@ -1322,9 +1516,14 @@
       window.selectedFacets = {};
       selectedFacets = window.selectedFacets;
 
-      if (typeof window.scientificNameFilter !== 'undefined') window.scientificNameFilter = null;
-      if (typeof window.scientificNameSearchText !== 'undefined') window.scientificNameSearchText = '';
-      if ($('#scientificNameSearch').length) $('#scientificNameSearch').val('');
+      if (typeof window.clearTaxonFilter === 'function') {
+        window.clearTaxonFilter();
+      } else {
+        if (typeof window.scientificNameFilter !== 'undefined') window.scientificNameFilter = null;
+        if (typeof window.scientificNameSearchText !== 'undefined') window.scientificNameSearchText = '';
+        window.taxonFilter = null;
+        if ($('#scientificNameSearch').length) $('#scientificNameSearch').val('');
+      }
 
       resetCustomFilters();
       syncUiFromState();
@@ -1347,6 +1546,21 @@
 
     const chips = [];
 
+    const taxonSearchText = String(window.scientificNameSearchText || '').trim();
+    if (taxonSearchText) {
+      const fieldLabel = window.taxonFilter?.field === 'family'
+        ? 'Family'
+        : (window.taxonFilter?.field === 'genus' ? 'Genus' : 'Taxon');
+      chips.push({
+        html: `
+          <span class="selected-facet" data-custom="taxon-filter">
+            <strong>${fieldLabel}:</strong> ${taxonSearchText}
+            <span class="remove-facet" title="Remove" aria-label="Remove filter">x</span>
+          </span>
+        `,
+      });
+    }
+
     Object.entries(selectedFacets).forEach(([field, values = []]) => {
       const label = FIELD_LABELS[field] || field;
       values.forEach((val) => {
@@ -1361,7 +1575,16 @@
       });
     });
 
-    if (!isFullDecadeRange()) {
+    if (hasExplicitYearRange()) {
+      chips.push({
+        html: `
+          <span class="selected-facet" data-custom="year-range">
+            <strong>Year:</strong> ${explicitYearSelectionLabel()}
+            <span class="remove-facet" title="Remove" aria-label="Remove filter">x</span>
+          </span>
+        `,
+      });
+    } else if (!isFullDecadeRange()) {
       const selection = getDecadeRangeFromState();
       chips.push({
         html: `
@@ -1426,8 +1649,22 @@
 
       if (customType) {
         if (customType === 'year-range' || customType === 'date-range') {
-          portalFilters.decadeStart = DEFAULT_FILTER_DECADE_START;
-          portalFilters.decadeEnd = MAX_DECADE_START;
+          if (hasExplicitYearRange()) {
+            portalFilters.startYear = null;
+            portalFilters.endYear = null;
+          } else {
+            portalFilters.decadeStart = DEFAULT_FILTER_DECADE_START;
+            portalFilters.decadeEnd = MAX_DECADE_START;
+          }
+        } else if (customType === 'taxon-filter') {
+          if (typeof window.clearTaxonFilter === 'function') {
+            window.clearTaxonFilter();
+          } else {
+            window.scientificNameFilter = null;
+            window.scientificNameSearchText = '';
+            window.taxonFilter = null;
+            if ($('#scientificNameSearch').length) $('#scientificNameSearch').val('');
+          }
         } else if (customType === 'presence-mode') {
           portalFilters.presenceMode = presenceModeLocked ? 'present' : 'both';
           if (!presenceModeLocked) lastUnlockedPresenceMode = 'both';
@@ -1462,7 +1699,16 @@
     $c.empty();
     if (!(aggregation && aggregation.buckets)) return;
 
-    const allBuckets = aggregation.buckets.filter((bucket) => !(field === 'mappedTraits' && isHiddenTrait(bucket.key)));
+    let allBuckets = aggregation.buckets.filter((bucket) => !(field === 'mappedTraits' && isHiddenTrait(bucket.key)));
+    if (field === 'dataSource') {
+      const existingValues = new Set(allBuckets.map((bucket) => String(bucket?.key || '')));
+      toArray(selectedFacets[field]).forEach((value) => {
+        const sourceValue = String(value || '').trim();
+        if (!sourceValue || existingValues.has(sourceValue)) return;
+        allBuckets = allBuckets.concat([{ key: sourceValue, doc_count: 0 }]);
+        existingValues.add(sourceValue);
+      });
+    }
     const limit = FACET_PREVIEW_LIMITS[field] || null;
     const expanded = !!facetExpandedState[field];
 
@@ -1606,13 +1852,11 @@
   // -----------------------
   function renderFacets(aggregations) {
     selectedFacets = window.selectedFacets || {};
-    updateAvailableDataSources(aggregations);
-    cacheFacetAggregations(aggregations);
+    const nonDataSourceAggregations = { ...(aggregations || {}) };
+    delete nonDataSourceAggregations.datasource_0;
+    cacheFacetAggregations(nonDataSourceAggregations);
 
-    $('#dataSourceFacets').empty();
     $('#allTraitsFilters').empty();
-
-    renderFacetLinks(aggregations.datasource_0, '#dataSourceFacets', 'dataSource');
 
     const traitAgg = { buckets: (aggregations?.mappedTraits_1?.buckets || []) };
     renderFacetLinks(traitAgg, '#allTraitsFilters', 'mappedTraits');
@@ -1625,7 +1869,7 @@
     updateQuerySummary();
 
     if (typeof window.onFacetStatsAggregationsAvailable === 'function') {
-      window.onFacetStatsAggregationsAvailable(aggregations);
+      window.onFacetStatsAggregationsAvailable(window.lastFacetStatsAggregations || nonDataSourceAggregations);
     }
   }
 

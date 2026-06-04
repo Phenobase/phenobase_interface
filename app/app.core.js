@@ -4,8 +4,10 @@ let currentPage = 1;
 let pageSize = 15;
 
 var apiUrl = `https://biscicol.org/phenobase/api/v1/query//phenobase2/_search?size=${pageSize}&from=0`;
-var queryStringRootURL = "https://biscicol.org/phenobase/api/v1/download/_search?q=";
+var taxonSuggestUrl = "/api/taxa/suggest";
+var downloadUrl = "/api/download";
 var downloadLink = "";
+const DOWNLOAD_LIMIT = 100000;
 const TABLE_SOURCE_FIELDS = [
   "annotationID",
   "dataSource",
@@ -52,7 +54,14 @@ var requestData = {
 var selectedFacets = {};
 var scientificNameFilter = null;
 var scientificNameSearchText = "";
+var taxonFilter = null;
+var taxonSuggestions = [];
+var taxonSuggestionIndex = -1;
+var taxonSuggestTimer = null;
+var taxonSuggestController = null;
+window.scientificNameFilter = scientificNameFilter;
 window.scientificNameSearchText = scientificNameSearchText;
+window.taxonFilter = taxonFilter;
 
 // NEW: Field-level AND/OR modes
 const facetModes = {
@@ -326,9 +335,9 @@ function calculateTotalFromFacets(aggregations) {
   return total;
 }
 function updateDownloadLink() {
-  const luceneQuery = convertJsonToLucene(requestData.query);
-  downloadLink = `${queryStringRootURL}${encodeURIComponent(luceneQuery)}&limit=100000`;
-  $("#downloadButton").attr("href", downloadLink).attr("download", "phenobase_data.json").prop("disabled", false);
+  const query = encodeURIComponent(JSON.stringify(requestData.query || { match_all: {} }));
+  downloadLink = `${downloadUrl}?query=${query}&limit=${DOWNLOAD_LIMIT}`;
+  $("#downloadButton").attr("href", downloadLink).attr("download", "phenobase_data.zip").prop("disabled", false);
 }
 function setActiveMainTab(tabName) {
   window.currentMainTab = tabName;
@@ -357,25 +366,260 @@ function setActiveMainTab(tabName) {
     window.syncStatsStatusVisibility();
   }
 }
-function buildScientificSearchFilter(searchTerm) {
+
+function loadStatsForCurrentFilters() {
+  if (typeof window.showInitialStatsView === 'function') {
+    window.showInitialStatsView();
+    return;
+  }
+  if (typeof window.fetchStatsData === 'function') {
+    window.fetchStatsData();
+  }
+}
+
+function normalizeTaxonSuggestion(suggestion) {
+  if (!suggestion || typeof suggestion !== "object") return null;
+  const label = String(suggestion.label || suggestion.value || "").trim();
+  const value = String(suggestion.value || suggestion.label || "").trim();
+  const field = String(suggestion.field || "").trim();
+  const rank = String(suggestion.rank || field || "").trim();
+  if (!value || !field) return null;
+  return { label: label || value, value, field, rank };
+}
+
+function escapeExactWildcardValue(value) {
+  return String(value || "").replace(/[\\*?\[\]{}]/g, (character) => `\\${character}`);
+}
+
+function buildCaseInsensitiveExactFilter(field, value) {
   return {
-    bool: {
-      should: [
-        { match: { scientificName: searchTerm } },
-        { match: { genus: searchTerm } },
-        { match: { family: searchTerm } },
-      ],
-      minimum_should_match: 1,
+    wildcard: {
+      [field]: {
+        value: escapeExactWildcardValue(value),
+        case_insensitive: true,
+      },
     },
   };
 }
-function syncScientificNameDraftFromInput() {
-  const scientificName = $("#scientificNameSearch").val().trim();
-  scientificNameSearchText = scientificName;
-  window.scientificNameSearchText = scientificNameSearchText;
-  scientificNameFilter = scientificName ? buildScientificSearchFilter(scientificName) : null;
-  window.scientificNameFilter = scientificNameFilter;
+
+function buildTaxonFilterFromSuggestion(suggestion) {
+  const normalized = normalizeTaxonSuggestion(suggestion);
+  if (!normalized) return null;
+
+  if (normalized.field === "scientificName") {
+    return buildCaseInsensitiveExactFilter("taxonSearch", normalized.value);
+  }
+
+  if (normalized.field === "genus" || normalized.field === "family") {
+    return buildCaseInsensitiveExactFilter(normalized.field, normalized.value);
+  }
+
+  return null;
 }
+
+function buildScientificSearchFilter(searchTerm) {
+  const value = String(searchTerm || "").trim();
+  if (!value) return null;
+  return buildTaxonFilterFromSuggestion({
+    label: value,
+    field: "scientificName",
+    rank: "species",
+    value,
+  });
+}
+
+function setTaxonFilter(suggestion) {
+  const normalized = normalizeTaxonSuggestion(suggestion);
+  const builtFilter = buildTaxonFilterFromSuggestion(normalized);
+
+  taxonFilter = builtFilter ? normalized : null;
+  window.taxonFilter = taxonFilter;
+  scientificNameSearchText = taxonFilter ? taxonFilter.value : "";
+  window.scientificNameSearchText = scientificNameSearchText;
+  scientificNameFilter = builtFilter;
+  window.scientificNameFilter = scientificNameFilter;
+
+  if ($("#scientificNameSearch").length) {
+    $("#scientificNameSearch")
+      .val(taxonFilter ? taxonFilter.label : "")
+      .attr("aria-expanded", "false");
+  }
+}
+
+function clearTaxonFilter(options = {}) {
+  const clearInput = options.clearInput !== false;
+  taxonFilter = null;
+  window.taxonFilter = null;
+  scientificNameFilter = null;
+  window.scientificNameFilter = null;
+  scientificNameSearchText = "";
+  window.scientificNameSearchText = "";
+  taxonSuggestions = [];
+  taxonSuggestionIndex = -1;
+
+  if (taxonSuggestTimer) {
+    window.clearTimeout(taxonSuggestTimer);
+    taxonSuggestTimer = null;
+  }
+  if (taxonSuggestController) {
+    taxonSuggestController.abort();
+    taxonSuggestController = null;
+  }
+  if (clearInput && $("#scientificNameSearch").length) {
+    $("#scientificNameSearch").val("");
+  }
+  hideTaxonSuggestions();
+}
+
+function syncScientificNameDraftFromInput() {
+  const inputValue = $("#scientificNameSearch").val().trim();
+  if (!inputValue) {
+    clearTaxonFilter({ clearInput: false });
+    return;
+  }
+
+  if (taxonFilter && inputValue !== taxonFilter.label) {
+    clearTaxonFilter({ clearInput: false });
+  }
+}
+
+function taxonFieldLabel(suggestion) {
+  const field = String(suggestion?.field || suggestion?.rank || "").trim();
+  if (field === "scientificName") return "species";
+  return field || "taxon";
+}
+
+function hideTaxonSuggestions() {
+  taxonSuggestions = [];
+  taxonSuggestionIndex = -1;
+  $("#taxonSuggestions").empty().removeClass("is-visible");
+  $("#scientificNameSearch").attr("aria-expanded", "false");
+}
+
+function renderTaxonSuggestions(items, message) {
+  const $list = $("#taxonSuggestions");
+  if (!$list.length) return;
+
+  taxonSuggestions = Array.isArray(items)
+    ? items.map(normalizeTaxonSuggestion).filter(Boolean)
+    : [];
+  taxonSuggestionIndex = taxonSuggestions.length ? 0 : -1;
+
+  if (!taxonSuggestions.length) {
+    $list
+      .html(`<div class="taxon-suggestion-empty">${message || "No matching taxa found"}</div>`)
+      .addClass("is-visible");
+    $("#scientificNameSearch").attr("aria-expanded", "true");
+    return;
+  }
+
+  $list
+    .html(taxonSuggestions.map((suggestion, index) => `
+      <button type="button" class="taxon-suggestion ${index === taxonSuggestionIndex ? "is-active" : ""}" role="option" data-index="${index}" aria-selected="${index === taxonSuggestionIndex ? "true" : "false"}">
+        <span class="taxon-suggestion-label">${suggestion.label}</span>
+        <span class="taxon-suggestion-rank">${taxonFieldLabel(suggestion)}</span>
+      </button>
+    `).join(""))
+    .addClass("is-visible");
+  $("#scientificNameSearch").attr("aria-expanded", "true");
+}
+
+function setActiveTaxonSuggestion(index) {
+  if (!taxonSuggestions.length) return;
+  taxonSuggestionIndex = (index + taxonSuggestions.length) % taxonSuggestions.length;
+  $("#taxonSuggestions .taxon-suggestion").each(function (itemIndex) {
+    const active = itemIndex === taxonSuggestionIndex;
+    $(this).toggleClass("is-active", active).attr("aria-selected", active ? "true" : "false");
+  });
+}
+
+function selectTaxonSuggestion(index) {
+  const suggestion = taxonSuggestions[index];
+  if (!suggestion) return;
+
+  setTaxonFilter(suggestion);
+  hideTaxonSuggestions();
+
+  if (typeof window.markFiltersPending === "function") {
+    window.markFiltersPending({ delayMs: 0 });
+  }
+}
+
+function fetchTaxonSuggestions(queryText) {
+  if (taxonSuggestController) {
+    taxonSuggestController.abort();
+    taxonSuggestController = null;
+  }
+
+  taxonSuggestController = typeof AbortController === "function" ? new AbortController() : null;
+  const signal = taxonSuggestController?.signal;
+
+  renderTaxonSuggestions([], "Searching taxa...");
+
+  fetch(`${taxonSuggestUrl}?q=${encodeURIComponent(queryText)}`, { signal })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Taxon suggestions failed: ${response.status}`);
+      return response.json();
+    })
+    .then((items) => {
+      if ($("#scientificNameSearch").val().trim() !== queryText) return;
+      renderTaxonSuggestions(items, "No matching taxa found");
+    })
+    .catch((error) => {
+      if (error?.name === "AbortError") return;
+      console.error("Unable to load taxon suggestions:", error);
+      renderTaxonSuggestions([], "No matching taxa found");
+    });
+}
+
+function handleTaxonInput() {
+  const queryText = $("#scientificNameSearch").val().trim();
+  const hadTaxonFilter = !!scientificNameFilter;
+
+  if (!queryText) {
+    clearTaxonFilter({ clearInput: false });
+    if (hadTaxonFilter && typeof window.markFiltersPending === "function") {
+      window.markFiltersPending({ delayMs: 0 });
+    }
+    return;
+  }
+
+  if (taxonFilter && queryText !== taxonFilter.label) {
+    clearTaxonFilter({ clearInput: false });
+    if (typeof window.markFiltersPending === "function") {
+      window.markFiltersPending({ delayMs: 0 });
+    }
+  }
+
+  if (taxonSuggestTimer) window.clearTimeout(taxonSuggestTimer);
+  taxonSuggestTimer = window.setTimeout(function () {
+    fetchTaxonSuggestions(queryText);
+  }, 300);
+}
+
+function handleTaxonKeydown(event) {
+  if (!$("#taxonSuggestions").hasClass("is-visible")) return;
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setActiveTaxonSuggestion(taxonSuggestionIndex + 1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setActiveTaxonSuggestion(taxonSuggestionIndex - 1);
+  } else if (event.key === "Enter") {
+    if (taxonSuggestionIndex >= 0) {
+      event.preventDefault();
+      selectTaxonSuggestion(taxonSuggestionIndex);
+    }
+  } else if (event.key === "Escape") {
+    hideTaxonSuggestions();
+  }
+}
+
+window.buildTaxonFilterFromSuggestion = buildTaxonFilterFromSuggestion;
+window.buildScientificSearchFilter = buildScientificSearchFilter;
+window.setTaxonFilter = setTaxonFilter;
+window.clearTaxonFilter = clearTaxonFilter;
 function buildTableRequestBody() {
   const signature = getCurrentQuerySignature();
   return {
@@ -498,6 +742,34 @@ function buildFacetRequestBody(aggs) {
   };
 }
 
+function clauseFiltersOnlyField(clause, field) {
+  if (!clause || typeof clause !== "object") return false;
+
+  const termFields = Object.keys(clause.term || {});
+  if (termFields.length === 1 && termFields[0] === field) return true;
+
+  const shouldClauses = clause.bool?.should;
+  if (Array.isArray(shouldClauses) && shouldClauses.length) {
+    return shouldClauses.every((childClause) => clauseFiltersOnlyField(childClause, field));
+  }
+
+  return false;
+}
+
+function queryWithoutFacetField(query, field) {
+  if (!query?.bool || !Array.isArray(query.bool.must)) return query || { match_all: {} };
+
+  const must = query.bool.must.filter((clause) => !clauseFiltersOnlyField(clause, field));
+  if (!must.length) return { match_all: {} };
+
+  return {
+    bool: {
+      ...query.bool,
+      must,
+    },
+  };
+}
+
 function fetchDataSourceFacetData() {
   const requestId = ++dataSourceFacetRequestId;
   if (activeDataSourceFacetRequest && typeof activeDataSourceFacetRequest.abort === "function") {
@@ -511,6 +783,7 @@ function fetchDataSourceFacetData() {
   const requestBody = buildFacetRequestBody({
     datasource_0: { terms: { field: "dataSource", size: 100 } },
   });
+  requestBody.query = queryWithoutFacetField(requestData.query, "dataSource");
 
   activeDataSourceFacetRequest = $.ajax({
     url: facetApiUrl,
@@ -716,20 +989,29 @@ $(document).ready(function () {
   if (typeof window.captureAppliedFilterState === 'function') {
     window.captureAppliedFilterState();
   }
-  setActiveMainTab('stats');
+  setActiveMainTab('table');
   fetchFacetData();
-  if (typeof window.showInitialStatsView === 'function') {
-    window.showInitialStatsView();
-  } else if (typeof window.fetchStatsData === 'function') {
-    window.fetchStatsData();
-  }
+  computeDynamicPageSize();
+  fetchResults();
 
-  $("#downloadButton").click(function () { updateDownloadLink(); if (!downloadLink) { event.preventDefault(); } });
-  $("#scientificNameSearch").on("input", function () {
-    syncScientificNameDraftFromInput();
-    if (typeof window.markFiltersPending === 'function') {
-      window.markFiltersPending({ delayMs: 500 });
+  $("#downloadButton").click(function (event) { updateDownloadLink(); if (!downloadLink) { event.preventDefault(); } });
+  $("#scientificNameSearch")
+    .on("input", handleTaxonInput)
+    .on("keydown", handleTaxonKeydown);
+  $("#clearTaxonSearch").on("click", function () {
+    const hadTaxonFilter = !!scientificNameFilter;
+    clearTaxonFilter();
+    if (hadTaxonFilter && typeof window.markFiltersPending === 'function') {
+      window.markFiltersPending({ delayMs: 0 });
     }
+  });
+  $("#taxonSuggestions").on("mousedown", ".taxon-suggestion", function (event) {
+    event.preventDefault();
+    selectTaxonSuggestion(Number($(this).data("index")));
+  });
+  $(document).on("mousedown.taxonSuggestions", function (event) {
+    if ($(event.target).closest(".taxon-search-container").length) return;
+    hideTaxonSuggestions();
   });
 
   $("#showTable").click(function () {
@@ -785,9 +1067,7 @@ $(document).ready(function () {
       if (typeof window.flushPendingFilters === 'function') {
         window.flushPendingFilters();
       }
-      if (typeof window.syncStatsStatusVisibility === 'function') {
-        window.syncStatsStatusVisibility();
-      }
+      loadStatsForCurrentFilters();
       return;
     }
     if (typeof window.hasRenderedStats === 'function' && window.hasRenderedStats()) {
@@ -796,11 +1076,7 @@ $(document).ready(function () {
       }
       return;
     }
-    if (typeof window.showInitialStatsView === 'function') {
-      window.showInitialStatsView();
-    } else if (typeof window.fetchStatsData === 'function') {
-      window.fetchStatsData();
-    }
+    loadStatsForCurrentFilters();
   });
 
   // Recompute on window resize (debounced) when table visible

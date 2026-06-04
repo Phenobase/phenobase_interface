@@ -1,0 +1,14 @@
+[build]
+  command = "gulp"
+  publish = "public"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/taxa/suggest"
+  to = "/.netlify/functions/taxa-suggest"
+  status = 200
+
+[[redirects]]
+  from = "/api/download"
+  to = "/.netlify/functions/download"
+  status = 200
