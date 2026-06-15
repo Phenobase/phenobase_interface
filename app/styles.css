@@ -236,6 +236,22 @@
   color: #23527c;
 }
 
+.source-filter-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0 2px;
+}
+
+.source-filter-message {
+  min-height: 16px;
+  margin-bottom: 4px;
+}
+
+.source-filter-message.is-dirty {
+  color: #92400e;
+}
+
 /* Selected facets styles */
 .selected-facets-container {
   margin-top: 20px;

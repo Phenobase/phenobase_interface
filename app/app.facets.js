@@ -111,6 +111,7 @@
   const availableTraitCountsLC = new Map();
   const decadeCountsByStart = new Map();
   let availableDataSources = [];
+  let sourceSelectionDraft = null;
   const FACET_PREVIEW_LIMITS = { family: 5, genus: 5 };
   const facetExpandedState = { family: false, genus: false };
   let initializedCustomControls = false;
@@ -144,6 +145,46 @@
 
   function normalizeLower(v) {
     return String(v || '').trim().toLowerCase();
+  }
+
+  function normalizeSourceValues(values) {
+    const seen = new Set();
+    const normalized = [];
+    toArray(values).forEach((value) => {
+      const source = String(value || '').trim();
+      if (!source || seen.has(source)) return;
+      seen.add(source);
+      normalized.push(source);
+    });
+    return normalized;
+  }
+
+  function sameValueSet(a, b) {
+    const left = normalizeSourceValues(a);
+    const right = normalizeSourceValues(b);
+    if (left.length !== right.length) return false;
+    const rightSet = new Set(right);
+    return left.every((value) => rightSet.has(value));
+  }
+
+  function getAppliedSourceValues() {
+    return normalizeSourceValues((window.selectedFacets || {}).dataSource);
+  }
+
+  function getDraftSourceValues() {
+    return sourceSelectionDraft ? normalizeSourceValues(sourceSelectionDraft) : getAppliedSourceValues();
+  }
+
+  function sourceDraftChanged() {
+    return !sameValueSet(getDraftSourceValues(), getAppliedSourceValues());
+  }
+
+  function setSourceDraftValues(values) {
+    sourceSelectionDraft = normalizeSourceValues(values);
+  }
+
+  function syncSourceDraftFromApplied() {
+    sourceSelectionDraft = null;
   }
 
   function normalizeExplicitYear(value) {
@@ -292,6 +333,7 @@
 
     window.selectedFacets = cloneSelectedFacetsState(nextState.selectedFacets || {});
     selectedFacets = window.selectedFacets;
+    syncSourceDraftFromApplied();
 
     const nextPortalFilters = clonePortalFilterState(nextState.portalFilters || {});
     portalFilters.presenceMode = nextPortalFilters.presenceMode;
@@ -579,6 +621,7 @@
 
     window.selectedFacets = selectedFromUrl;
     selectedFacets = window.selectedFacets;
+    syncSourceDraftFromApplied();
 
     if (scientificName) {
       const taxonSuggestion = buildTaxonSuggestionFromState(scientificName, taxonField);
@@ -1047,6 +1090,10 @@
     }
     window.selectedFacets = selectedFacets;
 
+    if (field === 'dataSource') {
+      syncSourceDraftFromApplied();
+      updateSourceSelectionUi();
+    }
     syncPresenceModeFromSelectedSources();
     markFiltersPending();
   }
@@ -1059,6 +1106,10 @@
     if (!selectedFacets[field].length) delete selectedFacets[field];
 
     window.selectedFacets = selectedFacets;
+    if (field === 'dataSource') {
+      syncSourceDraftFromApplied();
+      updateSourceSelectionUi();
+    }
     syncPresenceModeFromSelectedSources();
     markFiltersPending();
   }
@@ -1120,6 +1171,78 @@
         hint.style.display = 'none';
       }
     }
+  }
+
+  function setAppliedSourceValues(values) {
+    selectedFacets = window.selectedFacets || {};
+    const normalized = normalizeSourceValues(values);
+
+    if (normalized.length) selectedFacets.dataSource = normalized;
+    else delete selectedFacets.dataSource;
+
+    window.selectedFacets = selectedFacets;
+    syncSourceDraftFromApplied();
+    syncPresenceModeFromSelectedSources();
+  }
+
+  function updateSourceSelectionUi() {
+    const draftValues = getDraftSourceValues();
+    const draftSet = new Set(draftValues);
+    const appliedValues = getAppliedSourceValues();
+    const changed = sourceDraftChanged();
+
+    $('#dataSourceFacets .facet-option-check').each(function () {
+      const value = String($(this).data('value') || '').trim();
+      const checked = draftSet.has(value);
+      this.checked = checked;
+      $(this).closest('.facet-option-card').toggleClass('is-selected', checked);
+    });
+
+    const applyButton = document.getElementById('applySourceFilter');
+    const clearButton = document.getElementById('clearSourceFilter');
+    const message = document.getElementById('sourceFilterMessage');
+
+    if (applyButton) applyButton.disabled = !changed;
+    if (clearButton) clearButton.disabled = !(draftValues.length || appliedValues.length);
+
+    if (message) {
+      if (changed && draftValues.length) {
+        message.textContent = `${draftValues.length} source${draftValues.length === 1 ? '' : 's'} ready to apply.`;
+      } else if (changed) {
+        message.textContent = 'Sources ready to clear.';
+      } else if (appliedValues.length) {
+        message.textContent = `${appliedValues.length} source${appliedValues.length === 1 ? '' : 's'} applied.`;
+      } else {
+        message.textContent = '';
+      }
+      message.classList.toggle('is-dirty', changed);
+    }
+  }
+
+  function applyDraftSourceSelection() {
+    if (!sourceDraftChanged()) {
+      updateSourceSelectionUi();
+      return;
+    }
+
+    setAppliedSourceValues(getDraftSourceValues());
+    syncUiFromState();
+    markFiltersPending();
+  }
+
+  function clearSourceSelection() {
+    const hadAppliedSources = getAppliedSourceValues().length > 0;
+    setSourceDraftValues([]);
+
+    if (hadAppliedSources) {
+      setAppliedSourceValues([]);
+      syncUiFromState();
+      markFiltersPending();
+      return;
+    }
+
+    updateSourceSelectionUi();
+    updateQuerySummary();
   }
 
   // -----------------------
@@ -1308,6 +1431,7 @@
     updateTraitModeUi();
     renderPhenophaseFilters();
     syncPresenceModeFromSelectedSources();
+    updateSourceSelectionUi();
     updateQuerySummary();
   }
 
@@ -1377,6 +1501,8 @@
     const $applyYearFilter = $('#applyYearFilter');
     const $clearYearFilter = $('#clearYearFilter');
     const $yearInputs = $('#startYear, #endYear');
+    const $applySourceFilter = $('#applySourceFilter');
+    const $clearSourceFilter = $('#clearSourceFilter');
 
     window.onMapBBoxSelected = function (bounds) {
       portalFilters.geoBounds = normalizeGeoBounds(bounds);
@@ -1422,6 +1548,14 @@
 
     $yearInputs.on('input', function () {
       setYearValidationMessage('');
+    });
+
+    $applySourceFilter.on('click', function () {
+      applyDraftSourceSelection();
+    });
+
+    $clearSourceFilter.on('click', function () {
+      clearSourceSelection();
     });
 
     $(document).off('click', '.filter-info-btn').on('click', '.filter-info-btn', function (event) {
@@ -1515,6 +1649,7 @@
     $clearAllFilters.on('click', function () {
       window.selectedFacets = {};
       selectedFacets = window.selectedFacets;
+      syncSourceDraftFromApplied();
 
       if (typeof window.clearTaxonFilter === 'function') {
         window.clearTaxonFilter();
@@ -1702,7 +1837,7 @@
     let allBuckets = aggregation.buckets.filter((bucket) => !(field === 'mappedTraits' && isHiddenTrait(bucket.key)));
     if (field === 'dataSource') {
       const existingValues = new Set(allBuckets.map((bucket) => String(bucket?.key || '')));
-      toArray(selectedFacets[field]).forEach((value) => {
+      getDraftSourceValues().forEach((value) => {
         const sourceValue = String(value || '').trim();
         if (!sourceValue || existingValues.has(sourceValue)) return;
         allBuckets = allBuckets.concat([{ key: sourceValue, doc_count: 0 }]);
@@ -1717,7 +1852,7 @@
       bucketsToRender = allBuckets.slice(0, limit);
 
       // Keep any selected values visible even if they are outside the top preview slice.
-      const selectedValues = new Set(toArray(selectedFacets[field]));
+      const selectedValues = new Set(field === 'dataSource' ? getDraftSourceValues() : toArray(selectedFacets[field]));
       if (selectedValues.size) {
         allBuckets.forEach((bucket) => {
           if (!selectedValues.has(bucket.key)) return;
@@ -1727,9 +1862,10 @@
     }
 
     if (field === 'dataSource') {
+      const draftSourceValues = new Set(getDraftSourceValues());
       bucketsToRender.forEach((bucket) => {
         const key = bucket.key;
-        const isSelected = selectedFacets[field] && selectedFacets[field].includes(key);
+        const isSelected = draftSourceValues.has(key);
         const countFormatted = (bucket.doc_count || 0).toLocaleString();
 
         $c.append(`
@@ -1774,6 +1910,15 @@
     $c.off('change', '.facet-option-check').on('change', '.facet-option-check', function () {
       const targetField = $(this).data('field');
       const targetValue = $(this).data('value');
+      if (targetField === 'dataSource') {
+        const draftValues = getDraftSourceValues();
+        const nextValues = this.checked
+          ? draftValues.concat([targetValue])
+          : draftValues.filter((value) => value !== targetValue);
+        setSourceDraftValues(nextValues);
+        updateSourceSelectionUi();
+        return;
+      }
       if (this.checked) addFacet(targetField, targetValue);
       else removeFacet(targetField, targetValue);
     });
@@ -1793,6 +1938,8 @@
       const value = $(this).data('value');
       removeFacet(field, value);
     });
+
+    if (field === 'dataSource') updateSourceSelectionUi();
   }
 
   function updateTraitCountLookup(aggregations) {
