@@ -18,6 +18,7 @@ const TABLE_SOURCE_FIELDS = [
   "genus",
   "trait",
   "verbatimTrait",
+  "sourceRecordUrl",
   "observedMetadataUrl",
 ];
 const defaultTimeConfig = window.phenobaseTimeConfig || {};
@@ -850,10 +851,10 @@ function renderResults(results) {
     if (metadataUrl) {
       $("<a>")
         .attr({ href: metadataUrl, target: "_blank", rel: "noopener noreferrer" })
-        .text("Observation Metadata")
+        .text("URL")
         .appendTo($sourceCell);
     } else {
-      $sourceCell.text("Observation Metadata Unavailable");
+      $sourceCell.text("URL Unavailable");
     }
     $row.append($sourceCell);
     tableBody.append($row);
@@ -882,7 +883,7 @@ window.setResultsHeadingText = setResultsHeadingText;
 
 // Modal
 function observationMetadataUrlFromSource(sourceData) {
-  const urlFromDoc = String(sourceData?.observedMetadataUrl || '').trim();
+  const urlFromDoc = String(sourceData?.sourceRecordUrl || sourceData?.observedMetadataUrl || '').trim();
   if (urlFromDoc) return urlFromDoc;
   const rawId = sourceData?.annotationID;
   const npnId = (typeof rawId === 'string' && rawId.startsWith('npn:')) ? rawId.slice(4) : null;

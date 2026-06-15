@@ -15,7 +15,7 @@ var mapDotRenderer = L.canvas({ padding: 0.4 });
 
 const MAP_MAX_POINTS = 10000;
 const MAP_BATCH_SIZE = 2000;
-const MAP_SOURCE_FIELDS = ["latitude", "longitude", "scientificName", "mappedTraits", "year", "dataSource", "observedMetadataUrl", "annotationID"];
+const MAP_SOURCE_FIELDS = ["latitude", "longitude", "scientificName", "mappedTraits", "year", "dataSource", "sourceRecordUrl", "observedMetadataUrl", "annotationID"];
 
 var mapLoadState = {
   runId: 0,
@@ -146,7 +146,7 @@ function dotRadius(count) {
 }
 
 function observationMetadataUrlFromSource(src) {
-  const urlFromDoc = String(src?.observedMetadataUrl || '').trim();
+  const urlFromDoc = String(src?.sourceRecordUrl || src?.observedMetadataUrl || '').trim();
   if (urlFromDoc) return urlFromDoc;
 
   const rawId = src?.annotationID;
@@ -163,7 +163,7 @@ function dotPopupHtml(info) {
   const sampleName = info.sampleScientificName ? `<div><strong>Example:</strong> ${info.sampleScientificName}</div>` : '';
   const sampleSource = info.sampleSource ? `<div><strong>Source:</strong> ${info.sampleSource}</div>` : '';
   const metadataUrl = String(info.sampleMetadataUrl || '').trim();
-  const metadataLabel = (Number(info.count || 0) > 1) ? 'Example observation metadata' : 'Observation metadata';
+  const metadataLabel = (Number(info.count || 0) > 1) ? 'Example source record URL' : 'Source record URL';
   const metadataHtml = metadataUrl
     ? `<div><a href="${metadataUrl}" target="_blank" rel="noopener noreferrer">${metadataLabel}</a></div>`
     : `<div>${metadataLabel} unavailable</div>`;

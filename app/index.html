@@ -246,7 +246,7 @@
     </div>
     <p>This service will initiate a download of up to 100,000 records from the Phenobase database.</p>
     <p>The ZIP includes data.csv, citation notes, and a README.</p>
-    <p>The CSV includes all mapped Phenobase fields. The observedMetadataUrl column is required and included even when some rows have blank values.</p>
+    <p>The CSV includes the curated Phenobase export fields. The sourceRecordUrl column is included even when some rows have blank values.</p>
     <p>Downloads use the same active filters shown in the interface.</p>
     <p>Download may take up to 1 minute to commence.</p>
     <div id="downloadProgress" class="download-progress" hidden>
@@ -284,10 +284,36 @@
       let downloadProgressTimer = null;
       let downloadStartedAt = 0;
       let downloadPhase = "idle";
-      const DOWNLOAD_MAPPING_URL = "https://biscicol.org/phenobase/api/v1/query//phenobase2/_mapping";
       const DOWNLOAD_PAGE_SIZE = 1000;
       const CLIENT_DOWNLOAD_LIMIT = 100000;
-      const REQUIRED_DOWNLOAD_FIELDS = ["observedMetadataUrl"];
+      const EXPORT_FIELDS = [
+        "annotationID",
+        "dataSource",
+        "scientificName",
+        "trait",
+        "traitUrn",
+        "family",
+        "year",
+        "dayOfYear",
+        "latitude",
+        "longitude",
+        "sourceRecordUrl",
+        "annotationMethod",
+        "occurrenceID",
+        "organismID",
+        "siteID",
+        "input",
+        "genus",
+        "taxonRank",
+        "eventDate",
+        "recordedBy",
+        "coordinateUncertaintyInMeters",
+        "verbatimTrait",
+        "modelUri",
+        "accuracyExcludingUncertainFamily",
+        "mappedTraits",
+        "mappedTraitUrn",
+      ];
       let downloadCrcTable = null;
 
       function setDownloadProgress(percent) {
@@ -384,22 +410,9 @@
         return response.json();
       }
 
-      function getMappingProperties(mapping) {
-        const firstIndex = mapping && Object.values(mapping)[0];
-        return (firstIndex && firstIndex.mappings && firstIndex.mappings.properties)
-          || (mapping && mapping.mappings && mapping.mappings.properties)
-          || {};
-      }
-
       async function fetchDownloadFields(signal) {
         setDownloadStatus("Preparing download", "Reading the Phenobase field list.", { percent: 8 });
-        const mapping = await fetchDownloadJson(DOWNLOAD_MAPPING_URL, { signal });
-        const fields = Object.keys(getMappingProperties(mapping));
-        const missingFields = REQUIRED_DOWNLOAD_FIELDS.filter((field) => !fields.includes(field));
-        if (missingFields.length) {
-          throw new Error(`Download mapping is missing required field(s): ${missingFields.join(", ")}`);
-        }
-        return fields;
+        return EXPORT_FIELDS.slice();
       }
 
       function getDownloadQuery() {
@@ -467,7 +480,7 @@
       }
 
       function deriveObservedMetadataUrl(record) {
-        const existingUrl = String((record && record.observedMetadataUrl) || "").trim();
+        const existingUrl = String((record && (record.sourceRecordUrl || record.observedMetadataUrl)) || "").trim();
         if (existingUrl) return existingUrl;
 
         const rawId = String((record && record.annotationID) || "").trim();
@@ -482,16 +495,139 @@
 
       function enrichDownloadRecord(record) {
         const enriched = { ...(record || {}) };
-        if (!String(enriched.observedMetadataUrl || "").trim()) {
+        if (!String(enriched.sourceRecordUrl || enriched.observedMetadataUrl || "").trim()) {
           const derivedUrl = deriveObservedMetadataUrl(enriched);
           if (derivedUrl) enriched.observedMetadataUrl = derivedUrl;
         }
         return enriched;
       }
 
+      function firstValue(record, ...fields) {
+        for (const field of fields) {
+          const value = record && record[field];
+          if (value == null) continue;
+          if (typeof value === "string" && !value.trim()) continue;
+          return value;
+        }
+        return "";
+      }
+
+      function normalizeAnnotationMethod(value) {
+        const text = String(value || "").trim();
+        const key = text.toLowerCase();
+        if (key === "in_situ" || key === "in situ" || key === "human observation") return "human";
+        return text;
+      }
+
+      function deriveAnnotationMethod(record) {
+        const explicit = normalizeAnnotationMethod(firstValue(record, "annotationMethod", "annotation_method"));
+        if (explicit) return explicit;
+        if (deriveInput(record) === "human observation") return "human";
+        return "";
+      }
+
+      function deriveInput(record) {
+        const existing = String((record && record.input) || "").trim();
+        if (existing) return existing;
+
+        const source = String((record && record.dataSource) || "").trim().toLowerCase();
+        const method = normalizeAnnotationMethod(firstValue(record, "annotationMethod", "annotation_method")).toLowerCase();
+        const basis = String((record && record.basisOfRecord) || "").trim().toLowerCase();
+
+        if (source.includes("herbarium")) return "herbarium specimen image";
+        if (source.includes("inaturalist") || source === "inat" || source.includes("inat")) return "live plant image";
+        if (method === "human" || basis === "human observation") return "human observation";
+        if (basis) return basis;
+        return "";
+      }
+
+      function deriveOccurrenceId(record) {
+        const existing = firstValue(record, "occurrenceID");
+        if (existing) return existing;
+
+        const annotationId = String((record && record.annotationID) || "").trim();
+        const source = String((record && record.dataSource) || "").trim().toLowerCase();
+        if (annotationId.startsWith("npn:")) return annotationId.slice(4);
+        if (/^\d+$/.test(annotationId) && source.includes("national phenology network")) return annotationId;
+        return "";
+      }
+
+      function normalizeVerbatimTrait(value, record = {}) {
+        const text = String(value || "").trim();
+        if (!text) return "";
+
+        if (text.includes("=")) {
+          return text.split(";").map((part) => {
+            const trimmed = part.trim();
+            if (!trimmed.includes("=")) return trimmed;
+            const [left, ...rest] = trimmed.split("=");
+            return `${left.trim()} = ${rest.join("=").trim()}`;
+          }).join("; ");
+        }
+
+        const paren = text.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+        if (paren && /^(?:-?\d+(?:\.\d+)?|present|absent|observed|not observed|yes|no)$/i.test(paren[2].trim())) {
+          return `${paren[1].trim()} = ${paren[2].trim()}`;
+        }
+
+        const plantGroup = String(record.plant_group_id || "").trim();
+        const phenophase = String(record.phenophase_id || "").trim();
+        if (plantGroup && phenophase && text === `${plantGroup}:${phenophase}`) {
+          return `plantGroup = ${plantGroup}; phenophase = ${phenophase}`;
+        }
+
+        const textMatch = text.match(/^(.*?)\s+(present|absent)$/i);
+        if (textMatch) {
+          return `${textMatch[1].trim()} = ${textMatch[2].toLowerCase()}`;
+        }
+
+        const trait = String(record.trait || "").trim();
+        const traitMatch = trait.match(/^(.*?)\s+(present|absent)$/i);
+        if (traitMatch && text.toLowerCase() === traitMatch[1].trim().toLowerCase()) {
+          return `${text} = ${traitMatch[2].toLowerCase()}`;
+        }
+        if (traitMatch) {
+          return `${text} = ${traitMatch[2].toLowerCase()}`;
+        }
+
+        return text;
+      }
+
+      function projectExportRecord(record) {
+        const source = record || {};
+        return {
+          annotationID: source.annotationID,
+          dataSource: source.dataSource,
+          scientificName: source.scientificName,
+          trait: source.trait,
+          traitUrn: firstValue(source, "traitUrn", "trait_urn"),
+          family: source.family,
+          year: source.year,
+          dayOfYear: source.dayOfYear,
+          latitude: source.latitude,
+          longitude: source.longitude,
+          sourceRecordUrl: firstValue(source, "sourceRecordUrl", "observedMetadataUrl"),
+          annotationMethod: deriveAnnotationMethod(source),
+          occurrenceID: deriveOccurrenceId(source),
+          organismID: firstValue(source, "organismID", "individual_id"),
+          siteID: firstValue(source, "siteID", "locationID", "site_id"),
+          input: deriveInput(source),
+          genus: source.genus,
+          taxonRank: source.taxonRank,
+          eventDate: firstValue(source, "eventDate", "date"),
+          recordedBy: source.recordedBy,
+          coordinateUncertaintyInMeters: source.coordinateUncertaintyInMeters,
+          verbatimTrait: normalizeVerbatimTrait(firstValue(source, "verbatimTrait"), source),
+          modelUri: source.modelUri,
+          accuracyExcludingUncertainFamily: source.accuracyExcludingUncertainFamily,
+          mappedTraits: source.mappedTraits,
+          mappedTraitUrn: firstValue(source, "mappedTraitUrn", "mappedTraitUrns", "mappedTraitIDs"),
+        };
+      }
+
       function valueToCsvText(value) {
         if (value == null) return "";
-        if (Array.isArray(value)) return value.map(valueToCsvText).join(",");
+        if (Array.isArray(value)) return value.map(valueToCsvText).join("|");
         if (typeof value === "object") return JSON.stringify(value);
         return String(value);
       }
@@ -515,18 +651,11 @@
 
       function csvFromRecords(records, mappedFields) {
         const fields = mappedFields.slice();
-        const fieldSet = new Set(fields);
-        records.forEach((record) => {
-          Object.keys(record || {}).forEach((field) => {
-            if (fieldSet.has(field)) return;
-            fieldSet.add(field);
-            fields.push(field);
-          });
-        });
 
         const lines = [fields.map(escapeCsvValue).join(",")];
         records.forEach((record) => {
-          lines.push(fields.map((field) => escapeCsvValue(record && record[field])).join(","));
+          const projected = projectExportRecord(record);
+          lines.push(fields.map((field) => escapeCsvValue(projected && projected[field])).join(","));
         });
 
         return {
@@ -637,17 +766,17 @@
         return new Blob([...localParts, ...centralParts, end.bytes], { type: "application/zip" });
       }
 
-      function buildDownloadReadme({ query, limit, totalPossible, returned, fields, observedMetadataUrlRows }) {
+      function buildDownloadReadme({ query, limit, totalPossible, returned, fields, sourceRecordUrlRows }) {
         return [
           "The following contains information about your download from the Global Plant Phenology Database.",
           "",
           "data file = data.csv",
           `date query ran = ${new Date().toString()}`,
           `query = ${JSON.stringify(query)}`,
-          "fields returned = all mapped Phenobase fields",
+          "fields returned = curated Phenobase export fields",
           `field count = ${fields.length}`,
-          "required field observedMetadataUrl included = yes",
-          `rows with observedMetadataUrl value = ${observedMetadataUrlRows}`,
+          "required field sourceRecordUrl included = yes",
+          `rows with sourceRecordUrl value = ${sourceRecordUrlRows}`,
           `user specified limit = ${limit}`,
           `total results possible = ${totalPossible == null ? "unknown" : totalPossible.toLocaleString()}`,
           `total results returned = ${returned.toLocaleString()}`,
@@ -670,17 +799,17 @@
         const limit = CLIENT_DOWNLOAD_LIMIT;
         const fields = await fetchDownloadFields(signal);
         const { records, totalPossible } = await fetchDownloadRecords(query, limit, signal);
-        setDownloadStatus("Writing CSV", "Formatting records and deriving missing NPN metadata URLs.", { percent: 76, phase: "writing" });
+        setDownloadStatus("Writing CSV", "Formatting records and deriving missing NPN source record URLs.", { percent: 76, phase: "writing" });
         const enrichedRecords = records.map(enrichDownloadRecord);
         const csvResult = csvFromRecords(enrichedRecords, fields);
-        const observedMetadataUrlRows = rowsWithValue(enrichedRecords, "observedMetadataUrl");
+        const sourceRecordUrlRows = rowsWithValue(enrichedRecords.map(projectExportRecord), "sourceRecordUrl");
         const readme = buildDownloadReadme({
           query,
           limit,
           totalPossible,
           returned: enrichedRecords.length,
           fields: csvResult.fields,
-          observedMetadataUrlRows,
+          sourceRecordUrlRows,
         });
 
         setDownloadStatus("Packaging ZIP", "Creating data.csv, README, and citation notes in your browser.", { percent: 88, phase: "packaging" });
