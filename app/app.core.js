@@ -783,8 +783,16 @@ function fetchDataSourceFacetData() {
   const facetApiUrl = `${apiUrl.split('?')[0]}?size=0&from=0`;
   const requestBody = buildFacetRequestBody({
     datasource_0: { terms: { field: "dataSource", size: 100 } },
+    all_datasource_0: {
+      global: {},
+      aggs: {
+        datasource_0: { terms: { field: "dataSource", size: 100 } },
+      },
+    },
   });
-  requestBody.query = queryWithoutFacetField(requestData.query, "dataSource");
+  requestBody.query = typeof window.buildDataSourceFacetQuery === "function"
+    ? window.buildDataSourceFacetQuery()
+    : queryWithoutFacetField(requestData.query, "dataSource");
 
   activeDataSourceFacetRequest = $.ajax({
     url: facetApiUrl,
@@ -796,8 +804,9 @@ function fetchDataSourceFacetData() {
       if (requestId !== dataSourceFacetRequestId) return;
       activeDataSourceFacetRequest = null;
       const datasourceAggregation = response?.aggregations?.datasource_0;
+      const allDatasourceAggregation = response?.aggregations?.all_datasource_0?.datasource_0;
       if (datasourceAggregation && typeof window.renderDataSourceFacetAggregation === 'function') {
-        window.renderDataSourceFacetAggregation(datasourceAggregation);
+        window.renderDataSourceFacetAggregation(datasourceAggregation, allDatasourceAggregation);
         return;
       }
       console.error("Unexpected datasource facet response", response);

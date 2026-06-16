@@ -172,11 +172,11 @@
   }
 
   function getDraftSourceValues() {
-    return sourceSelectionDraft ? normalizeSourceValues(sourceSelectionDraft) : getAppliedSourceValues();
+    return sourceSelectionDraft !== null ? normalizeSourceValues(sourceSelectionDraft) : getAppliedSourceValues();
   }
 
   function sourceDraftChanged() {
-    return !sameValueSet(getDraftSourceValues(), getAppliedSourceValues());
+    return sourceSelectionDraft !== null && !sameValueSet(sourceSelectionDraft, getAppliedSourceValues());
   }
 
   function setSourceDraftValues(values) {
@@ -185,6 +185,14 @@
 
   function syncSourceDraftFromApplied() {
     sourceSelectionDraft = null;
+  }
+
+  function hasAppliedSourceState(source = window.selectedFacets || {}) {
+    return Object.prototype.hasOwnProperty.call(source, 'dataSource');
+  }
+
+  function allKnownSourcesSelected(values = getAppliedSourceValues()) {
+    return availableDataSources.length > 0 && sameValueSet(values, availableDataSources);
   }
 
   function normalizeExplicitYear(value) {
@@ -230,6 +238,10 @@
       const normalized = toArray(values)
         .map((value) => String(value || '').trim())
         .filter(Boolean);
+      if (field === 'dataSource') {
+        clone[field] = normalized.slice();
+        return;
+      }
       if (normalized.length) clone[field] = normalized.slice();
     });
     return clone;
@@ -305,13 +317,22 @@
     if (message) {
       message.textContent = autoApplyInFlight
         ? 'Updating filters...'
-        : (filtersDirty ? 'Updating filters shortly...' : 'Filters update automatically.');
-      message.classList.toggle('is-dirty', filtersDirty || autoApplyInFlight);
-      message.classList.toggle('is-clean', !filtersDirty && !autoApplyInFlight);
+        : (sourceDraftChanged() ? 'Apply source changes to continue.' : (filtersDirty ? 'Updating filters shortly...' : 'Filters update automatically.'));
+      message.classList.toggle('is-dirty', filtersDirty || sourceDraftChanged() || autoApplyInFlight);
+      message.classList.toggle('is-clean', !filtersDirty && !sourceDraftChanged() && !autoApplyInFlight);
     }
 
-    if (applyButton) applyButton.disabled = !filtersDirty;
-    if (resetButton) resetButton.disabled = !filtersDirty;
+    if (applyButton) applyButton.disabled = !(filtersDirty || sourceDraftChanged());
+    if (resetButton) resetButton.disabled = !(filtersDirty || sourceDraftChanged());
+
+    updateSourceSelectionUi();
+  }
+
+  function cancelAutoApplyForSourceDraft() {
+    if (!autoApplyTimer) return;
+    window.clearTimeout(autoApplyTimer);
+    autoApplyTimer = null;
+    refreshFilterApplyUi();
   }
 
   function recomputeFilterDirtyState() {
@@ -384,7 +405,7 @@
     recomputeFilterDirtyState();
     renderSelectedFacets();
     updateQuerySummary();
-    if (filtersDirty) {
+    if (filtersDirty && !sourceDraftChanged()) {
       scheduleAutoApply(options.delayMs);
     }
   }
@@ -393,6 +414,10 @@
     if (autoApplyTimer) {
       window.clearTimeout(autoApplyTimer);
       autoApplyTimer = null;
+    }
+    if (sourceDraftChanged()) {
+      setAppliedSourceValues(getDraftSourceValues());
+      syncSourceDraftFromApplied();
     }
     resetPaging();
     updateQueryWithSelectedFacets();
@@ -561,10 +586,6 @@
     const taxonField = String(window.taxonFilter?.field || '').trim();
     const explicitStartYear = normalizeExplicitYear(portalFilters.startYear);
     const explicitEndYear = normalizeExplicitYear(portalFilters.endYear);
-    const effectiveDataSources = toArray(selectedFacetsState.dataSource).length
-      ? toArray(selectedFacetsState.dataSource)
-      : availableDataSources;
-
     if (scientificName) {
       params.set('scientificName', scientificName);
       params.set('taxonField', taxonField || 'scientificName');
@@ -585,7 +606,7 @@
     if ((portalFilters.traitMode || 'simple') !== 'simple') params.set('traitMode', String(portalFilters.traitMode || 'simple'));
     else params.delete('traitMode');
 
-    setArrayParams(params, 'dataSource', effectiveDataSources);
+    setArrayParams(params, 'dataSource', selectedFacetsState.dataSource);
     setArrayParams(params, 'mappedTrait', selectedFacetsState.mappedTraits);
     setArrayParams(params, 'phenophase', portalFilters.selectedPhenophases);
 
@@ -885,6 +906,14 @@
 
     Object.entries(selectedFacets).forEach(([field, values]) => {
       const normalized = toArray(values).filter(Boolean);
+      if (field === 'dataSource') {
+        if (hasAppliedSourceState(selectedFacets) && !normalized.length) {
+          parts.push('Source: none');
+        } else if (!allKnownSourcesSelected(normalized)) {
+          parts.push(`Source: ${formatList(normalized, 2)}`);
+        }
+        return;
+      }
       if (!normalized.length) return;
       const fieldLabel = (field === 'dataSource') ? 'Source' : (field === 'mappedTraits' ? 'Traits' : field);
       parts.push(`${fieldLabel}: ${formatList(normalized, 2)}`);
@@ -912,7 +941,9 @@
       parts.push(`Geo: lat ${bounds.minLatText}..${bounds.maxLatText}, lon ${bounds.minLonText}..${bounds.maxLonText}`);
     }
 
-    if (filtersDirty) {
+    if (sourceDraftChanged()) {
+      parts.push('Source changes pending');
+    } else if (filtersDirty) {
       parts.push('Pending apply');
     }
 
@@ -930,11 +961,18 @@
   // -----------------------
   // Query builders
   // -----------------------
-  function buildFacetMustClauses() {
+  function buildFacetMustClauses(options = {}) {
     const must = [];
+    const excludeFields = new Set(toArray(options.excludeFields));
 
     Object.entries(selectedFacets).forEach(([field, values]) => {
+      if (excludeFields.has(field)) return;
       const cleaned = toArray(values).filter((v) => v != null && v !== '' && !(field === 'mappedTraits' && isHiddenTrait(v)));
+      if (field === 'dataSource' && hasAppliedSourceState(selectedFacets) && !cleaned.length) {
+        must.push({ term: { dataSource: '__NO_SOURCE_SELECTED__' } });
+        return;
+      }
+      if (field === 'dataSource' && allKnownSourcesSelected(cleaned)) return;
       if (!cleaned.length) return;
 
       if (cleaned.length === 1) {
@@ -974,13 +1012,13 @@
     return { wildcard: { mappedTraits: `*${mode}` } };
   }
 
-  function getPhenophaseMappedTraitTerms() {
+  function getPhenophaseMappedTraitTerms(options = {}) {
     if (getTraitMode() !== 'simple') return [];
 
     const selected = portalFilters.selectedPhenophases || [];
     if (!selected.length) return [];
 
-    const mode = (portalFilters.presenceMode || 'both').toLowerCase();
+    const mode = String(options.presenceMode || portalFilters.presenceMode || 'both').toLowerCase();
     const terms = new Set();
 
     selected.forEach((phaseBase) => {
@@ -994,8 +1032,8 @@
     return Array.from(terms);
   }
 
-  function buildPhenophaseClause() {
-    const terms = getPhenophaseMappedTraitTerms();
+  function buildPhenophaseClause(options = {}) {
+    const terms = getPhenophaseMappedTraitTerms(options);
     if (!terms.length) return null;
 
     return {
@@ -1004,6 +1042,32 @@
         minimum_should_match: 1,
       },
     };
+  }
+
+  function buildDataSourceFacetQuery() {
+    selectedFacets = window.selectedFacets || {};
+
+    const must = [];
+
+    must.push(...buildFacetMustClauses({ excludeFields: ['dataSource'] }));
+
+    if (window.scientificNameFilter) {
+      must.push(window.scientificNameFilter);
+    }
+
+    const dateClause = buildDateRangeClause();
+    if (dateClause) must.push(dateClause);
+
+    const presenceClause = buildPresenceClause();
+    if (presenceClause) must.push(presenceClause);
+
+    const phenophaseClause = buildPhenophaseClause();
+    if (phenophaseClause) must.push(phenophaseClause);
+
+    const geoClauses = buildGeoRangeClauses();
+    must.push(...geoClauses);
+
+    return must.length ? { bool: { must } } : { match_all: {} };
   }
 
   function buildGeoRangeClauses() {
@@ -1091,7 +1155,6 @@
     window.selectedFacets = selectedFacets;
 
     if (field === 'dataSource') {
-      syncSourceDraftFromApplied();
       updateSourceSelectionUi();
     }
     syncPresenceModeFromSelectedSources();
@@ -1103,11 +1166,10 @@
     if (!selectedFacets[field]) return;
 
     selectedFacets[field] = selectedFacets[field].filter((v) => v !== value);
-    if (!selectedFacets[field].length) delete selectedFacets[field];
+    if (!selectedFacets[field].length && field !== 'dataSource') delete selectedFacets[field];
 
     window.selectedFacets = selectedFacets;
     if (field === 'dataSource') {
-      syncSourceDraftFromApplied();
       updateSourceSelectionUi();
     }
     syncPresenceModeFromSelectedSources();
@@ -1118,14 +1180,15 @@
   window.removeFacet = removeFacet;
   window.updateQueryWithSelectedFacets = updateQueryWithSelectedFacets;
   window.initializePortalFiltersFromUrl = initializePortalFiltersFromUrl;
+  window.buildDataSourceFacetQuery = buildDataSourceFacetQuery;
   window.applyPendingFilters = applyPendingFilters;
   window.markFiltersPending = markFiltersPending;
   window.flushPendingFilters = function flushPendingFilters() {
-    if (filtersDirty || autoApplyTimer) applyPendingFilters();
+    if (filtersDirty || autoApplyTimer || sourceDraftChanged()) applyPendingFilters();
   };
   window.captureAppliedFilterState = captureAppliedFilterState;
   window.hasPendingFilterChanges = function hasPendingFilterChanges() {
-    return !!filtersDirty;
+    return !!(filtersDirty || sourceDraftChanged());
   };
 
   // -----------------------
@@ -1177,18 +1240,52 @@
     selectedFacets = window.selectedFacets || {};
     const normalized = normalizeSourceValues(values);
 
-    if (normalized.length) selectedFacets.dataSource = normalized;
-    else delete selectedFacets.dataSource;
+    selectedFacets.dataSource = normalized;
 
     window.selectedFacets = selectedFacets;
-    syncSourceDraftFromApplied();
     syncPresenceModeFromSelectedSources();
+  }
+
+  function updateSourceGateUi(gated = sourceDraftChanged()) {
+    const disabled = !!gated;
+    const $gateControls = $([
+      '#startYear',
+      '#endYear',
+      '#applyYearFilter',
+      '#clearYearFilter',
+      '#clearGeoBounds',
+      '#setGeoBoundsOnMap',
+      '#traitModeSimple',
+      '#traitModeAll',
+      '#clearAllFiltersButton',
+      '#resetDraftFiltersButton',
+      '#scientificNameSearch',
+      '#clearTaxonSearch',
+      '#phenophaseFilters input',
+      '#allTraitsFilters input',
+    ].join(','));
+
+    $gateControls.prop('disabled', disabled);
+    $('input[name="presenceMode"]').prop('disabled', disabled || presenceModeLocked);
+
+    $('#phenophaseFilters, #allTraitsFilters, #yearRangeSlider')
+      .toggleClass('is-source-gated', disabled)
+      .attr('aria-disabled', disabled ? 'true' : null);
+    $('#allTraitsFilters .facet-link, #selectedFacets .remove-facet')
+      .toggleClass('is-source-gated', disabled)
+      .attr('aria-disabled', disabled ? 'true' : null);
+  }
+
+  function requireSourceSelectionApplied() {
+    if (!sourceDraftChanged()) return true;
+    updateSourceSelectionUi();
+    return false;
   }
 
   function updateSourceSelectionUi() {
     const draftValues = getDraftSourceValues();
     const draftSet = new Set(draftValues);
-    const appliedValues = getAppliedSourceValues();
+    const hasSourceState = hasAppliedSourceState();
     const changed = sourceDraftChanged();
 
     $('#dataSourceFacets .facet-option-check').each(function () {
@@ -1203,20 +1300,26 @@
     const message = document.getElementById('sourceFilterMessage');
 
     if (applyButton) applyButton.disabled = !changed;
-    if (clearButton) clearButton.disabled = !(draftValues.length || appliedValues.length);
+    if (clearButton) clearButton.disabled = !draftValues.length;
 
     if (message) {
-      if (changed && draftValues.length) {
-        message.textContent = `${draftValues.length} source${draftValues.length === 1 ? '' : 's'} ready to apply.`;
+      if (changed && !draftValues.length) {
+        message.textContent = 'No sources selected. Click Apply now before changing other filters.';
       } else if (changed) {
-        message.textContent = 'Sources ready to clear.';
-      } else if (appliedValues.length) {
-        message.textContent = `${appliedValues.length} source${appliedValues.length === 1 ? '' : 's'} applied.`;
+        message.textContent = `${draftValues.length} source${draftValues.length === 1 ? '' : 's'} selected. Click Apply now before changing other filters.`;
+      } else if (hasSourceState && !draftValues.length) {
+        message.textContent = 'No sources selected.';
+      } else if (allKnownSourcesSelected(draftValues)) {
+        message.textContent = 'All sources selected.';
+      } else if (draftValues.length) {
+        message.textContent = `${draftValues.length} source${draftValues.length === 1 ? '' : 's'} applied.`;
       } else {
         message.textContent = '';
       }
       message.classList.toggle('is-dirty', changed);
     }
+
+    updateSourceGateUi(changed);
   }
 
   function applyDraftSourceSelection() {
@@ -1225,23 +1328,19 @@
       return;
     }
 
-    setAppliedSourceValues(getDraftSourceValues());
-    syncUiFromState();
-    markFiltersPending();
+    applyPendingFilters();
   }
 
   function clearSourceSelection() {
-    const hadAppliedSources = getAppliedSourceValues().length > 0;
-    setSourceDraftValues([]);
-
-    if (hadAppliedSources) {
-      setAppliedSourceValues([]);
-      syncUiFromState();
-      markFiltersPending();
+    if (!getDraftSourceValues().length) {
+      updateSourceSelectionUi();
       return;
     }
 
+    setSourceDraftValues([]);
+    cancelAutoApplyForSourceDraft();
     updateSourceSelectionUi();
+    renderSelectedFacets();
     updateQuerySummary();
   }
 
@@ -1466,6 +1565,7 @@
         updateDecadeSliderAccessibility();
       },
       slide: function (_event, ui) {
+        if (!requireSourceSelectionApplied()) return false;
         portalFilters.decadeStart = DECADE_STARTS[ui.values[0]];
         portalFilters.decadeEnd = DECADE_STARTS[ui.values[1]];
         updateYearRangeDisplay();
@@ -1474,6 +1574,7 @@
         updateQuerySummary();
       },
       stop: function (_event, ui) {
+        if (!requireSourceSelectionApplied()) return false;
         portalFilters.decadeStart = DECADE_STARTS[ui.values[0]];
         portalFilters.decadeEnd = DECADE_STARTS[ui.values[1]];
         updateDecadeSliderAccessibility();
@@ -1505,12 +1606,14 @@
     const $clearSourceFilter = $('#clearSourceFilter');
 
     window.onMapBBoxSelected = function (bounds) {
+      if (!requireSourceSelectionApplied()) return;
       portalFilters.geoBounds = normalizeGeoBounds(bounds);
       syncUiFromState();
       markFiltersPending();
     };
 
     window.onMapBBoxCleared = function () {
+      if (!requireSourceSelectionApplied()) return;
       if (!portalFilters.geoBounds) return;
       portalFilters.geoBounds = null;
       syncUiFromState();
@@ -1520,6 +1623,7 @@
     initializeYearSlider();
 
     $applyYearFilter.on('click', function () {
+      if (!requireSourceSelectionApplied()) return;
       const result = validateYearInputs();
       if (!result.valid) {
         setYearValidationMessage(result.message);
@@ -1533,6 +1637,7 @@
     });
 
     $clearYearFilter.on('click', function () {
+      if (!requireSourceSelectionApplied()) return;
       portalFilters.startYear = null;
       portalFilters.endYear = null;
       setYearValidationMessage('');
@@ -1576,14 +1681,20 @@
     });
 
     $traitModeSimple.on('click', function () {
+      if (!requireSourceSelectionApplied()) return;
       switchTraitMode('simple', { fromUser: true });
     });
 
     $traitModeAll.on('click', function () {
+      if (!requireSourceSelectionApplied()) return;
       switchTraitMode('all', { fromUser: true });
     });
 
     $presence.on('change', function () {
+      if (!requireSourceSelectionApplied()) {
+        syncUiFromState();
+        return;
+      }
       if (presenceModeLocked) return;
       portalFilters.presenceMode = String($(this).val() || 'both').toLowerCase();
       lastUnlockedPresenceMode = portalFilters.presenceMode;
@@ -1591,6 +1702,10 @@
     });
 
     $('#phenophaseFilters').on('change', '.phenophase-check', function () {
+      if (!requireSourceSelectionApplied()) {
+        renderPhenophaseFilters();
+        return;
+      }
       const phase = normalizeLower($(this).data('phase'));
       const selected = selectedPhenophasesSet();
       if (this.checked) selected.add(phase);
@@ -1600,6 +1715,7 @@
     });
 
     $clearGeo.on('click', function () {
+      if (!requireSourceSelectionApplied()) return;
       portalFilters.geoBounds = null;
       if (typeof window.clearSelectedBoundingBoxOverlay === 'function') {
         window.clearSelectedBoundingBoxOverlay();
@@ -1609,6 +1725,7 @@
     });
 
     $setGeoOnMap.on('click', function () {
+      if (!requireSourceSelectionApplied()) return;
       $('#showMap').trigger('click');
 
       const mapReady = typeof window.ensurePhenobaseMapLoaded === 'function'
@@ -1647,7 +1764,10 @@
     });
 
     $clearAllFilters.on('click', function () {
-      window.selectedFacets = {};
+      if (!requireSourceSelectionApplied()) return;
+      window.selectedFacets = availableDataSources.length
+        ? { dataSource: availableDataSources.slice() }
+        : {};
       selectedFacets = window.selectedFacets;
       syncSourceDraftFromApplied();
 
@@ -1697,8 +1817,34 @@
     }
 
     Object.entries(selectedFacets).forEach(([field, values = []]) => {
+      const normalizedValues = toArray(values).filter(Boolean);
+      if (field === 'dataSource') {
+        const sourceValues = sourceDraftChanged() ? getDraftSourceValues() : normalizedValues;
+        if (!sourceValues.length) {
+          chips.push({
+            html: `
+              <span class="selected-facet" data-custom="source-selection-empty">
+                <strong>Source:</strong> none
+                <span class="remove-facet" title="Select all sources" aria-label="Select all sources">x</span>
+              </span>
+            `,
+          });
+        }
+        if (!sourceValues.length || allKnownSourcesSelected(sourceValues)) return;
+        sourceValues.forEach((val) => {
+          chips.push({
+            html: `
+              <span class="selected-facet" data-field="${field}" data-value="${val}">
+                <strong>${FIELD_LABELS[field] || field}:</strong> ${val}
+                <span class="remove-facet" title="Remove" aria-label="Remove filter">x</span>
+              </span>
+            `,
+          });
+        });
+        return;
+      }
       const label = FIELD_LABELS[field] || field;
-      values.forEach((val) => {
+      normalizedValues.forEach((val) => {
         chips.push({
           html: `
             <span class="selected-facet" data-field="${field}" data-value="${val}">
@@ -1783,6 +1929,7 @@
       const customType = $p.data('custom');
 
       if (customType) {
+        if (customType !== 'source-selection-empty' && !requireSourceSelectionApplied()) return;
         if (customType === 'year-range' || customType === 'date-range') {
           if (hasExplicitYearRange()) {
             portalFilters.startYear = null;
@@ -1810,15 +1957,36 @@
         } else if (customType === 'phenophase') {
           const val = normalizeLower($p.data('value'));
           portalFilters.selectedPhenophases = (portalFilters.selectedPhenophases || []).filter((p) => normalizeLower(p) !== val);
+        } else if (customType === 'source-selection-empty') {
+          if (sourceDraftChanged()) {
+            setSourceDraftValues(availableDataSources);
+            cancelAutoApplyForSourceDraft();
+            updateSourceSelectionUi();
+            renderSelectedFacets();
+            updateQuerySummary();
+            return;
+          }
+          setAppliedSourceValues(availableDataSources);
+          syncSourceDraftFromApplied();
         }
 
         syncUiFromState();
-        markFiltersPending();
+        markFiltersPending({ delayMs: customType === 'source-selection-empty' ? 0 : undefined });
         return;
       }
 
       const field = $p.data('field');
       const value = $p.data('value');
+      if (field === 'dataSource') {
+        const nextValues = getDraftSourceValues().filter((sourceValue) => sourceValue !== value);
+        setSourceDraftValues(nextValues);
+        cancelAutoApplyForSourceDraft();
+        updateSourceSelectionUi();
+        renderSelectedFacets();
+        updateQuerySummary();
+        return;
+      }
+      if (!requireSourceSelectionApplied()) return;
       removeFacet(field, value);
     });
 
@@ -1902,6 +2070,7 @@
 
     $c.find('.facet-link').off('click').on('click', function (e) {
       e.preventDefault();
+      if (!requireSourceSelectionApplied()) return;
       const field = $(this).data('field');
       const value = $(this).data('value');
       if (!$(this).hasClass('selected')) addFacet(field, value);
@@ -1916,7 +2085,14 @@
           ? draftValues.concat([targetValue])
           : draftValues.filter((value) => value !== targetValue);
         setSourceDraftValues(nextValues);
+        cancelAutoApplyForSourceDraft();
         updateSourceSelectionUi();
+        renderSelectedFacets();
+        updateQuerySummary();
+        return;
+      }
+      if (!requireSourceSelectionApplied()) {
+        this.checked = !this.checked;
         return;
       }
       if (this.checked) addFacet(targetField, targetValue);
@@ -1925,6 +2101,7 @@
 
     $c.off('click', '.facet-see-more').on('click', '.facet-see-more', function (e) {
       e.preventDefault();
+      if (!requireSourceSelectionApplied()) return;
       const targetField = String($(this).data('field') || '');
       if (!FACET_PREVIEW_LIMITS[targetField]) return;
       facetExpandedState[targetField] = !facetExpandedState[targetField];
@@ -1934,6 +2111,7 @@
     $c.off('click', '.remove-facet').on('click', '.remove-facet', function (e) {
       e.preventDefault();
       e.stopPropagation();
+      if (!requireSourceSelectionApplied()) return;
       const field = $(this).data('field');
       const value = $(this).data('value');
       removeFacet(field, value);
@@ -1956,6 +2134,54 @@
       .filter(Boolean);
   }
 
+  function ensureDefaultSourceSelection() {
+    selectedFacets = window.selectedFacets || {};
+    if (hasAppliedSourceState(selectedFacets) || !availableDataSources.length) return false;
+
+    selectedFacets.dataSource = availableDataSources.slice();
+    window.selectedFacets = selectedFacets;
+    syncPresenceModeFromSelectedSources();
+    if (!(filtersDirty || autoApplyTimer || autoApplyInFlight)) {
+      updateQueryWithSelectedFacets();
+      captureAppliedFilterState();
+    }
+    return true;
+  }
+
+  function mergeDataSourceFacetAggregation(filteredAggregation, allSourceAggregation) {
+    const filteredBuckets = filteredAggregation?.buckets || [];
+    const allBuckets = allSourceAggregation?.buckets || [];
+    const countsBySource = new Map();
+    const orderedSources = [];
+    const seen = new Set();
+
+    filteredBuckets.forEach((bucket) => {
+      const key = String(bucket?.key || '').trim();
+      if (!key) return;
+      countsBySource.set(key, bucket?.doc_count || 0);
+    });
+
+    const addSource = (value) => {
+      const key = String(value || '').trim();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      orderedSources.push(key);
+    };
+
+    allBuckets.forEach((bucket) => addSource(bucket?.key));
+    availableDataSources.forEach(addSource);
+    filteredBuckets.forEach((bucket) => addSource(bucket?.key));
+    getAppliedSourceValues().forEach(addSource);
+
+    return {
+      ...(filteredAggregation || {}),
+      buckets: orderedSources.map((key) => ({
+        key,
+        doc_count: countsBySource.get(key) || 0,
+      })),
+    };
+  }
+
   function currentFacetSignature() {
     if (typeof window.getCurrentQuerySignature === 'function') {
       return window.getCurrentQuerySignature();
@@ -1976,16 +2202,12 @@
     window.lastFacetStatsSignature = currentFacetSignature();
   }
 
-  function renderDataSourceFacetAggregation(aggregation) {
+  function renderDataSourceFacetAggregation(aggregation, allSourceAggregation) {
     if (!aggregation?.buckets) return;
     selectedFacets = window.selectedFacets || {};
-    cacheFacetAggregations({ datasource_0: aggregation });
-    updateAvailableDataSources({ datasource_0: aggregation });
-    renderFacetLinks(aggregation, '#dataSourceFacets', 'dataSource');
-
-    if (typeof window.onFacetStatsAggregationsAvailable === 'function') {
-      window.onFacetStatsAggregationsAvailable(window.lastFacetStatsAggregations);
-    }
+    updateAvailableDataSources({ datasource_0: allSourceAggregation?.buckets ? allSourceAggregation : aggregation });
+    ensureDefaultSourceSelection();
+    renderFacetLinks(mergeDataSourceFacetAggregation(aggregation, allSourceAggregation), '#dataSourceFacets', 'dataSource');
   }
 
   function renderDataSourceFacetLoading(message) {
@@ -1999,9 +2221,7 @@
   // -----------------------
   function renderFacets(aggregations) {
     selectedFacets = window.selectedFacets || {};
-    const nonDataSourceAggregations = { ...(aggregations || {}) };
-    delete nonDataSourceAggregations.datasource_0;
-    cacheFacetAggregations(nonDataSourceAggregations);
+    cacheFacetAggregations(aggregations || {});
 
     $('#allTraitsFilters').empty();
 
@@ -2016,7 +2236,7 @@
     updateQuerySummary();
 
     if (typeof window.onFacetStatsAggregationsAvailable === 'function') {
-      window.onFacetStatsAggregationsAvailable(window.lastFacetStatsAggregations || nonDataSourceAggregations);
+      window.onFacetStatsAggregationsAvailable(window.lastFacetStatsAggregations || aggregations);
     }
   }
 
