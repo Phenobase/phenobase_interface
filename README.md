@@ -81,7 +81,9 @@ Each filter title has an inline `i` help icon that opens a small popover.
 
 ### Presence
 
-- Options: `Both`, `Present`, `Absent`
+- Rendered as `Present` and `Absent` checkboxes
+- Checking both includes present and absent records
+- At least one presence option remains selected
 - Auto-locks to `Present` when every selected data source only supports present records
 
 ### Phenophase Categories

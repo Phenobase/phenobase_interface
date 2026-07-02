@@ -67,12 +67,11 @@
               <i class="fas fa-circle-info" aria-hidden="true"></i>
             </button>
           </div>
-          <div id="helpPresence" class="filter-help-popover" role="tooltip" hidden>Choose present, absent, or both. Some sources only provide present records.</div>
+          <div id="helpPresence" class="filter-help-popover" role="tooltip" hidden>Check present, absent, or both. Some sources only provide present records.</div>
         </div>
         <fieldset id="presenceModeGroup" class="presence-controls">
-          <label><input type="radio" name="presenceMode" value="both" checked> Both</label>
-          <label><input type="radio" name="presenceMode" value="present"> Present</label>
-          <label><input type="radio" name="presenceMode" value="absent"> Absent</label>
+          <label><input type="checkbox" name="presenceMode" value="present" checked> Present</label>
+          <label><input type="checkbox" name="presenceMode" value="absent" checked> Absent</label>
         </fieldset>
         <div id="presenceModeHint" class="text-muted filter-hint" style="display:none;"></div>
 
@@ -90,7 +89,7 @@
           <button id="traitModeAll" class="btn btn-default btn-sm" type="button">All traits</button>
         </div>
         <div id="traitModeWarning" class="text-warning filter-hint" style="display:none;"></div>
-        <p class="filter-help trait-count-note">Counts may include inferred parent traits from the PPO hierarchy and are not necessarily additive.</p>
+        <p class="filter-help trait-count-note" style="display:none;">Raw trait counts may include inferred parent traits from the PPO hierarchy and are not necessarily additive.</p>
         <div id="phenophaseFilters"></div>
         <div id="allTraitsFilters" style="display:none;"></div>
 
@@ -253,6 +252,10 @@
     <p>The ZIP includes data.csv, citation notes, and a README.</p>
     <p>The CSV includes the curated Phenobase export fields. The sourceRecordUrl column is included even when some rows have blank values.</p>
     <p>Downloads use the same active filters shown in the interface.</p>
+    <div id="absentDownloadWarning" class="alert alert-warning" role="alert" style="display:none;">
+      <strong>Absent Data Caution</strong>
+      <p>This download may include absent records, which are more complex to analyze than presence records. Please interpret them carefully and consider source-specific observation context before using them in analyses.</p>
+    </div>
     <p>Download may take up to 1 minute to commence.</p>
     <div id="downloadProgress" class="download-progress" hidden>
       <div class="download-progress-title" id="downloadProgressTitle">Preparing download</div>
@@ -377,6 +380,7 @@
         $("#downloadProgressTitle").text("Preparing download");
         $("#downloadProgressMessage").text("Waiting to start.");
         $("#downloadProgressMeta").text("");
+        $("#absentDownloadWarning").hide();
         setDownloadProgress(0);
       }
 
@@ -771,8 +775,69 @@
         return new Blob([...localParts, ...centralParts, end.bytes], { type: "application/zip" });
       }
 
+      const ABSENT_DATA_DOWNLOAD_WARNING = "This download may include absent records, which are more complex to analyze than presence records. Please interpret them carefully and consider source-specific observation context before using them in analyses.";
+
+      function normalizeDownloadPresenceMode(value) {
+        const mode = String(value || "").trim().toLowerCase();
+        return mode === "present" || mode === "absent" || mode === "both" ? mode : "";
+      }
+
+      function collectStringLeaves(node, values = []) {
+        if (node == null) return values;
+        if (Array.isArray(node)) {
+          node.forEach((item) => collectStringLeaves(item, values));
+          return values;
+        }
+        if (typeof node === "object") {
+          Object.values(node).forEach((value) => collectStringLeaves(value, values));
+          return values;
+        }
+        values.push(String(node || ""));
+        return values;
+      }
+
+      function collectMappedTraitQueryValues(node, values = []) {
+        if (!node || typeof node !== "object") return values;
+
+        if (Array.isArray(node)) {
+          node.forEach((item) => collectMappedTraitQueryValues(item, values));
+          return values;
+        }
+
+        Object.entries(node).forEach(([key, value]) => {
+          if (key === "mappedTraits") {
+            collectStringLeaves(value, values);
+            return;
+          }
+          collectMappedTraitQueryValues(value, values);
+        });
+
+        return values;
+      }
+
+      function mappedTraitValueTargetsStatus(value, status) {
+        const text = String(value || "").trim().toLowerCase();
+        if (!text) return false;
+        return text === status || text.endsWith(` ${status}`) || text.endsWith(`*${status}`);
+      }
+
+      function downloadMayIncludeAbsentRecords(query) {
+        const mode = normalizeDownloadPresenceMode(window.portalFilters && window.portalFilters.presenceMode);
+        const traitValues = collectMappedTraitQueryValues(query);
+        const targetsAbsent = traitValues.some((value) => mappedTraitValueTargetsStatus(value, "absent"));
+        if (targetsAbsent) return true;
+        if (mode === "absent" || mode === "both") return true;
+        if (mode === "present") return false;
+        if (!traitValues.length) return true;
+        return !traitValues.some((value) => mappedTraitValueTargetsStatus(value, "present"));
+      }
+
+      function updateAbsentDownloadWarning(query) {
+        $("#absentDownloadWarning").toggle(downloadMayIncludeAbsentRecords(query));
+      }
+
       function buildDownloadReadme({ query, limit, totalPossible, returned, fields, sourceRecordUrlRows }) {
-        return [
+        const lines = [
           "The following contains information about your download from the Global Plant Phenology Database.",
           "",
           "data file = data.csv",
@@ -786,7 +851,13 @@
           `total results possible = ${totalPossible == null ? "unknown" : totalPossible.toLocaleString()}`,
           `total results returned = ${returned.toLocaleString()}`,
           "",
-        ].join("\n");
+        ];
+
+        if (downloadMayIncludeAbsentRecords(query)) {
+          lines.push("Absent data caution", ABSENT_DATA_DOWNLOAD_WARNING, "");
+        }
+
+        return lines.join("\n");
       }
 
       function buildCitationText() {
@@ -875,6 +946,7 @@
         // Start the spinner
         $("#spinner").show();
         resetDownloadProgress();
+        updateAbsentDownloadWarning(getDownloadQuery());
 
         // Open the human verification dialog
         $("#humanCheckDialog").dialog({

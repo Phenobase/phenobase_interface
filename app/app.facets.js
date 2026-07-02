@@ -108,7 +108,6 @@
   delete portalFilters.dateEnd;
   delete portalFilters.advancedTraitsVisible;
 
-  const availableTraitCountsLC = new Map();
   const decadeCountsByStart = new Map();
   let availableDataSources = [];
   let sourceSelectionDraft = null;
@@ -117,7 +116,7 @@
   let initializedCustomControls = false;
   let yearSliderInitialized = false;
   let presenceModeLocked = false;
-  let lastUnlockedPresenceMode = portalFilters.presenceMode || 'both';
+  let lastUnlockedPresenceMode = normalizePresenceMode(portalFilters.presenceMode);
   let traitModeWarningTimer = null;
   let maxDecadeCount = 0;
   let appliedFilterState = null;
@@ -145,6 +144,39 @@
 
   function normalizeLower(v) {
     return String(v || '').trim().toLowerCase();
+  }
+
+  function normalizePresenceMode(value) {
+    const mode = normalizeLower(value);
+    return mode === 'present' || mode === 'absent' || mode === 'both' ? mode : 'both';
+  }
+
+  function presenceModeFromInputs() {
+    const present = document.querySelector('input[name="presenceMode"][value="present"]');
+    const absent = document.querySelector('input[name="presenceMode"][value="absent"]');
+    const presentChecked = !!(present && present.checked);
+    const absentChecked = !!(absent && absent.checked);
+
+    if (presentChecked && absentChecked) return 'both';
+    if (presentChecked) return 'present';
+    if (absentChecked) return 'absent';
+    return null;
+  }
+
+  function syncPresenceInputsFromMode() {
+    const mode = normalizePresenceMode(portalFilters.presenceMode);
+    portalFilters.presenceMode = mode;
+
+    document.querySelectorAll('input[name="presenceMode"]').forEach((input) => {
+      const value = normalizeLower(input.value);
+      if (value === 'present') {
+        input.checked = mode !== 'absent';
+      } else if (value === 'absent') {
+        input.checked = mode !== 'present';
+      } else {
+        input.checked = value === mode;
+      }
+    });
   }
 
   function normalizeSourceValues(values) {
@@ -250,7 +282,7 @@
   function clonePortalFilterState(source) {
     const bounds = normalizeGeoBounds(source?.geoBounds);
     return {
-      presenceMode: String(source?.presenceMode || 'both').toLowerCase(),
+      presenceMode: normalizePresenceMode(source?.presenceMode),
       decadeStart: clampDecadeStart(source?.decadeStart, DEFAULT_FILTER_DECADE_START),
       decadeEnd: clampDecadeStart(source?.decadeEnd, MAX_DECADE_START),
       startYear: normalizeExplicitYear(source?.startYear),
@@ -601,7 +633,7 @@
     if (explicitEndYear != null) params.set('endYear', String(explicitEndYear));
     else params.delete('endYear');
 
-    params.set('presenceMode', String(portalFilters.presenceMode || 'both'));
+    params.set('presenceMode', normalizePresenceMode(portalFilters.presenceMode));
 
     if ((portalFilters.traitMode || 'simple') !== 'simple') params.set('traitMode', String(portalFilters.traitMode || 'simple'));
     else params.delete('traitMode');
@@ -658,8 +690,8 @@
       }
     }
 
-    if (presenceMode === 'present' || presenceMode === 'absent' || presenceMode === 'both') {
-      portalFilters.presenceMode = presenceMode;
+    if (params.has('presenceMode')) {
+      portalFilters.presenceMode = normalizePresenceMode(presenceMode);
     }
 
     if (traitMode === 'all' || traitMode === 'simple') {
@@ -867,6 +899,7 @@
     $('#traitModeAll').toggleClass('active', !simple);
     $('#phenophaseFilters').toggle(simple);
     $('#allTraitsFilters').toggle(!simple);
+    $('.trait-count-note').toggle(!simple);
   }
 
   function switchTraitMode(mode, { fromUser = false } = {}) {
@@ -926,7 +959,7 @@
       parts.push(`Decade: ${decadeSelectionLabel(selection)}`);
     }
 
-    const presenceMode = (portalFilters.presenceMode || 'both').toLowerCase();
+    const presenceMode = normalizePresenceMode(portalFilters.presenceMode);
     if (presenceMode !== 'both') {
       parts.push(`Presence: ${presenceMode}`);
     }
@@ -1007,7 +1040,7 @@
   }
 
   function buildPresenceClause() {
-    const mode = (portalFilters.presenceMode || 'both').toLowerCase();
+    const mode = normalizePresenceMode(portalFilters.presenceMode);
     if (mode !== 'present' && mode !== 'absent') return null;
     return { wildcard: { mappedTraits: `*${mode}` } };
   }
@@ -1018,7 +1051,7 @@
     const selected = portalFilters.selectedPhenophases || [];
     if (!selected.length) return [];
 
-    const mode = String(options.presenceMode || portalFilters.presenceMode || 'both').toLowerCase();
+    const mode = normalizePresenceMode(options.presenceMode || portalFilters.presenceMode);
     const terms = new Set();
 
     selected.forEach((phaseBase) => {
@@ -1199,7 +1232,7 @@
     const selectedSources = toArray(selectedFacets.dataSource);
     const lockToPresent = selectedSources.length > 0 && selectedSources.every(presentOnlySource);
 
-    const radios = document.querySelectorAll('input[name="presenceMode"]');
+    const inputs = document.querySelectorAll('input[name="presenceMode"]');
     const hint = document.getElementById('presenceModeHint');
 
     if (lockToPresent) {
@@ -1209,10 +1242,10 @@
       presenceModeLocked = true;
       portalFilters.presenceMode = 'present';
 
-      radios.forEach((r) => {
-        r.disabled = true;
-        r.checked = (r.value === 'present');
+      inputs.forEach((input) => {
+        input.disabled = true;
       });
+      syncPresenceInputsFromMode();
 
       if (hint) {
         hint.textContent = 'Selected data source(s) only provide present records.';
@@ -1224,10 +1257,10 @@
       }
 
       presenceModeLocked = false;
-      radios.forEach((r) => {
-        r.disabled = false;
-        r.checked = (r.value === portalFilters.presenceMode);
+      inputs.forEach((input) => {
+        input.disabled = false;
       });
+      syncPresenceInputsFromMode();
 
       if (hint) {
         hint.textContent = '';
@@ -1347,12 +1380,6 @@
   // -----------------------
   // Custom controls UI
   // -----------------------
-  function phenophaseCountFor(base) {
-    const present = availableTraitCountsLC.get(`${base} present`) || 0;
-    const absent = availableTraitCountsLC.get(`${base} absent`) || 0;
-    return present + absent;
-  }
-
   function renderPhenophaseFilters() {
     const container = document.getElementById('phenophaseFilters');
     if (!container) return;
@@ -1363,12 +1390,10 @@
       const selectedInCategory = cat.phases.filter((p) => selected.has(p.key)).length;
       const options = cat.phases.map((phase) => {
         const checked = selected.has(phase.key) ? 'checked' : '';
-        const count = phenophaseCountFor(phase.key);
-        const countLabel = count ? `<span class="phenophase-count">(${count.toLocaleString()})</span>` : '';
         return `
           <label class="phenophase-option">
             <input type="checkbox" class="phenophase-check" data-phase="${phase.key}" ${checked}>
-            ${phase.label} ${countLabel}
+            ${phase.label}
           </label>
         `;
       }).join('');
@@ -1510,10 +1535,7 @@
         : '';
     }
 
-    const radios = document.querySelectorAll('input[name="presenceMode"]');
-    radios.forEach((r) => {
-      r.checked = (r.value === portalFilters.presenceMode);
-    });
+    syncPresenceInputsFromMode();
 
     const selection = getDecadeRangeFromState();
     const $yearSlider = $('#yearRangeSlider');
@@ -1695,9 +1717,18 @@
         syncUiFromState();
         return;
       }
-      if (presenceModeLocked) return;
-      portalFilters.presenceMode = String($(this).val() || 'both').toLowerCase();
+      if (presenceModeLocked) {
+        syncPresenceInputsFromMode();
+        return;
+      }
+      const nextPresenceMode = presenceModeFromInputs();
+      if (!nextPresenceMode) {
+        syncPresenceInputsFromMode();
+        return;
+      }
+      portalFilters.presenceMode = nextPresenceMode;
       lastUnlockedPresenceMode = portalFilters.presenceMode;
+      syncPresenceInputsFromMode();
       markFiltersPending();
     });
 
@@ -1877,11 +1908,12 @@
       });
     }
 
-    if ((portalFilters.presenceMode || 'both') !== 'both') {
+    const selectedPresenceMode = normalizePresenceMode(portalFilters.presenceMode);
+    if (selectedPresenceMode !== 'both') {
       chips.push({
         html: `
           <span class="selected-facet" data-custom="presence-mode">
-            <strong>Presence:</strong> ${portalFilters.presenceMode}
+            <strong>Presence:</strong> ${selectedPresenceMode}
             <span class="remove-facet" title="Remove" aria-label="Remove filter">x</span>
           </span>
         `,
@@ -2120,14 +2152,6 @@
     if (field === 'dataSource') updateSourceSelectionUi();
   }
 
-  function updateTraitCountLookup(aggregations) {
-    availableTraitCountsLC.clear();
-    const buckets = aggregations?.mappedTraits_1?.buckets || [];
-    buckets.forEach((b) => {
-      availableTraitCountsLC.set(normalizeLower(b.key), b.doc_count || 0);
-    });
-  }
-
   function updateAvailableDataSources(aggregations) {
     availableDataSources = (aggregations?.datasource_0?.buckets || [])
       .map((bucket) => String(bucket?.key || '').trim())
@@ -2228,7 +2252,6 @@
     const traitAgg = { buckets: (aggregations?.mappedTraits_1?.buckets || []) };
     renderFacetLinks(traitAgg, '#allTraitsFilters', 'mappedTraits');
 
-    updateTraitCountLookup(aggregations);
     updateDecadeCountLookup(aggregations);
     syncUiFromState();
 

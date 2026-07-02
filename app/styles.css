@@ -1092,12 +1092,6 @@ html, body { color: #000 !important; background: #fff; }
   margin-right: 6px;
 }
 
-.phenophase-count {
-  color: #777;
-  margin-left: 4px;
-  font-size: 12px;
-}
-
 .trait-mode-toggle {
   margin: 8px 0 4px;
   display: flex;
