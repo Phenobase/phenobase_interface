@@ -111,8 +111,8 @@
   const decadeCountsByStart = new Map();
   let availableDataSources = [];
   let sourceSelectionDraft = null;
-  const FACET_PREVIEW_LIMITS = { family: 5, genus: 5 };
-  const facetExpandedState = { family: false, genus: false };
+  const FACET_PREVIEW_LIMITS = { standardizedFamily: 5, genus: 5 };
+  const facetExpandedState = { standardizedFamily: false, genus: false };
   let initializedCustomControls = false;
   let yearSliderInitialized = false;
   let presenceModeLocked = false;
@@ -948,7 +948,7 @@
         return;
       }
       if (!normalized.length) return;
-      const fieldLabel = (field === 'dataSource') ? 'Source' : (field === 'mappedTraits' ? 'Traits' : field);
+      const fieldLabel = FIELD_LABELS[field] || ((field === 'dataSource') ? 'Source' : (field === 'mappedTraits' ? 'Traits' : field));
       parts.push(`${fieldLabel}: ${formatList(normalized, 2)}`);
     });
 
@@ -987,7 +987,7 @@
   const FIELD_LABELS = {
     dataSource: 'Data Source',
     mappedTraits: 'Trait',
-    family: 'Family',
+    standardizedFamily: 'Family',
     genus: 'Genus',
   };
 
@@ -1834,7 +1834,7 @@
 
     const taxonSearchText = String(window.scientificNameSearchText || '').trim();
     if (taxonSearchText) {
-      const fieldLabel = window.taxonFilter?.field === 'family'
+      const fieldLabel = window.taxonFilter?.field === 'standardizedFamily' || window.taxonFilter?.field === 'family'
         ? 'Family'
         : (window.taxonFilter?.field === 'genus' ? 'Genus' : 'Taxon');
       chips.push({

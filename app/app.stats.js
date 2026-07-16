@@ -667,7 +667,7 @@ function buildStatsBaseAggregations() {
         },
       },
     },
-    family_2: { terms: { field: "family", size: 50 } },
+    family_2: { terms: { field: "standardizedFamily", size: 50 } },
     genus_3: { terms: { field: "genus", size: 50 } },
   };
 }

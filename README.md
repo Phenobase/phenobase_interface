@@ -112,7 +112,7 @@ Internally the UI now queries the indexed `decadeStart` field instead of dynamic
 - Full-text search across:
   - `scientificName`
   - `genus`
-  - `family`
+  - `standardizedFamily`
 - The placeholder and help text both reflect that broader search scope
 - When Stats is visible, scientific-name search now refreshes the Stats tab as well as the table query
 
@@ -163,7 +163,7 @@ Internally the UI now queries the indexed `decadeStart` field instead of dynamic
   - scientific name
   - year
   - day of year
-  - family
+  - family (`standardizedFamily`)
   - genus
   - trait
   - verbatim trait
@@ -332,7 +332,7 @@ cat > /tmp/phenobase-global-stats-request.json <<'JSON'
         "extended_bounds": { "min": 1970, "max": 2020 }
       }
     },
-    "family_2": { "terms": { "field": "family", "size": 50 } },
+    "family_2": { "terms": { "field": "standardizedFamily", "size": 50 } },
     "genus_3": { "terms": { "field": "genus", "size": 50 } },
     "phenophasePresenceSummary_4": {
       "filters": {
@@ -432,7 +432,7 @@ The frontend talks to the Phenobase proxy endpoint and sends Elasticsearch-style
 - Aggregations used by the sidebar:
   - `datasource_0`
   - `mappedTraits_1`
-  - `family_2`
+  - `family_2` (`standardizedFamily`)
   - `genus_3`
   - `decade_4`
 

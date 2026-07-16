@@ -14,7 +14,8 @@ const TABLE_SOURCE_FIELDS = [
   "scientificName",
   "year",
   "dayOfYear",
-  "family",
+  "standardizedFamily",
+  "verbatimFamily",
   "genus",
   "trait",
   "verbatimTrait",
@@ -38,7 +39,7 @@ var requestData = {
   aggs: {
     datasource_0: { terms: { field: "dataSource", size: 100 } },
     mappedTraits_1: { terms: { field: "mappedTraits", size: 2000 } },
-    family_2: { terms: { field: "family", size: 50 } },
+    family_2: { terms: { field: "standardizedFamily", size: 50 } },
     genus_3: { terms: { field: "genus", size: 50 } },
     decade_4: {
       histogram: {
@@ -67,7 +68,7 @@ window.taxonFilter = taxonFilter;
 // NEW: Field-level AND/OR modes
 const facetModes = {
   dataSource: 'AND',
-  family: 'AND',
+  standardizedFamily: 'AND',
   genus: 'AND',
   // mappedTraits is driven by the Option-B OR groups; leave as AND here for normal term selections
   mappedTraits: 'AND',
@@ -411,8 +412,12 @@ function buildTaxonFilterFromSuggestion(suggestion) {
     return buildCaseInsensitiveExactFilter("taxonSearch", normalized.value);
   }
 
-  if (normalized.field === "genus" || normalized.field === "family") {
-    return buildCaseInsensitiveExactFilter(normalized.field, normalized.value);
+  if (normalized.field === "standardizedFamily" || normalized.field === "family") {
+    return buildCaseInsensitiveExactFilter("standardizedFamily", normalized.value);
+  }
+
+  if (normalized.field === "genus") {
+    return buildCaseInsensitiveExactFilter("genus", normalized.value);
   }
 
   return null;
@@ -487,6 +492,7 @@ function syncScientificNameDraftFromInput() {
 function taxonFieldLabel(suggestion) {
   const field = String(suggestion?.field || suggestion?.rank || "").trim();
   if (field === "scientificName") return "species";
+  if (field === "standardizedFamily") return "family";
   return field || "taxon";
 }
 
@@ -847,7 +853,7 @@ function renderResults(results) {
       source.scientificName,
       source.year,
       source.dayOfYear,
-      source.family,
+      source.standardizedFamily || source.verbatimFamily || source.family,
       source.genus,
       source.trait,
       source.verbatimTrait,

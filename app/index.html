@@ -296,31 +296,33 @@
       const CLIENT_DOWNLOAD_LIMIT = 100000;
       const EXPORT_FIELDS = [
         "annotationID",
-        "dataSource",
         "scientificName",
+        "taxonRank",
+        "verbatimFamily",
+        "standardizedFamily",
+        "genus",
+        "taxonSearch",
         "trait",
         "traitUrn",
-        "family",
+        "mappedTraits",
+        "mappedTraitsUrns",
+        "date",
         "year",
         "dayOfYear",
         "latitude",
         "longitude",
-        "sourceRecordUrl",
-        "annotationMethod",
+        "coordinateUncertaintyInMeters",
+        "dataSource",
         "occurrenceID",
         "organismID",
-        "siteID",
-        "input",
-        "genus",
-        "taxonRank",
-        "eventDate",
+        "locationID",
         "recordedBy",
-        "coordinateUncertaintyInMeters",
         "verbatimTrait",
+        "sourceRecordUrl",
+        "collectionMethod",
+        "annotationMethod",
         "modelUri",
-        "accuracyExcludingUncertainFamily",
-        "mappedTraits",
-        "mappedTraitUrn",
+        "accuracyFamily",
       ];
       let downloadCrcTable = null;
 
@@ -531,22 +533,20 @@
       function deriveAnnotationMethod(record) {
         const explicit = normalizeAnnotationMethod(firstValue(record, "annotationMethod", "annotation_method"));
         if (explicit) return explicit;
-        if (deriveInput(record) === "human observation") return "human";
+        if (deriveCollectionMethod(record) === "human observation") return "human";
         return "";
       }
 
-      function deriveInput(record) {
-        const existing = String((record && record.input) || "").trim();
+      function deriveCollectionMethod(record) {
+        const existing = String(firstValue(record, "collectionMethod", "basisOfRecord", "input") || "").trim();
         if (existing) return existing;
 
         const source = String((record && record.dataSource) || "").trim().toLowerCase();
         const method = normalizeAnnotationMethod(firstValue(record, "annotationMethod", "annotation_method")).toLowerCase();
-        const basis = String((record && record.basisOfRecord) || "").trim().toLowerCase();
 
         if (source.includes("herbarium")) return "herbarium specimen image";
         if (source.includes("inaturalist") || source === "inat" || source.includes("inat")) return "live plant image";
-        if (method === "human" || basis === "human observation") return "human observation";
-        if (basis) return basis;
+        if (method === "human") return "human observation";
         return "";
       }
 
@@ -606,31 +606,33 @@
         const source = record || {};
         return {
           annotationID: source.annotationID,
-          dataSource: source.dataSource,
           scientificName: source.scientificName,
+          taxonRank: source.taxonRank,
+          verbatimFamily: firstValue(source, "verbatimFamily", "family"),
+          standardizedFamily: firstValue(source, "standardizedFamily", "gbifFamily"),
+          genus: source.genus,
+          taxonSearch: source.taxonSearch,
           trait: source.trait,
           traitUrn: firstValue(source, "traitUrn", "trait_urn"),
-          family: source.family,
+          mappedTraits: source.mappedTraits,
+          mappedTraitsUrns: firstValue(source, "mappedTraitsUrns", "mappedTraitUrn", "mappedTraitIDs"),
+          date: firstValue(source, "date", "eventDate"),
           year: source.year,
           dayOfYear: source.dayOfYear,
           latitude: source.latitude,
           longitude: source.longitude,
-          sourceRecordUrl: firstValue(source, "sourceRecordUrl", "observedMetadataUrl"),
-          annotationMethod: deriveAnnotationMethod(source),
+          coordinateUncertaintyInMeters: source.coordinateUncertaintyInMeters,
+          dataSource: source.dataSource,
           occurrenceID: deriveOccurrenceId(source),
           organismID: firstValue(source, "organismID", "individual_id"),
-          siteID: firstValue(source, "siteID", "locationID", "site_id"),
-          input: deriveInput(source),
-          genus: source.genus,
-          taxonRank: source.taxonRank,
-          eventDate: firstValue(source, "eventDate", "date"),
+          locationID: firstValue(source, "locationID", "siteID", "site_id"),
           recordedBy: source.recordedBy,
-          coordinateUncertaintyInMeters: source.coordinateUncertaintyInMeters,
           verbatimTrait: normalizeVerbatimTrait(firstValue(source, "verbatimTrait"), source),
+          sourceRecordUrl: firstValue(source, "sourceRecordUrl", "observedMetadataUrl"),
+          collectionMethod: deriveCollectionMethod(source),
+          annotationMethod: deriveAnnotationMethod(source),
           modelUri: source.modelUri,
-          accuracyExcludingUncertainFamily: source.accuracyExcludingUncertainFamily,
-          mappedTraits: source.mappedTraits,
-          mappedTraitUrn: firstValue(source, "mappedTraitUrn", "mappedTraitUrns", "mappedTraitIDs"),
+          accuracyFamily: firstValue(source, "accuracyFamily", "accuracyExcludingUncertainFamily"),
         };
       }
 
