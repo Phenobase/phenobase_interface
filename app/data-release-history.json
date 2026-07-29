@@ -2,6 +2,34 @@
   "project": "Phenobase",
   "entries": [
     {
+      "datasetVersion": "2026.07.29",
+      "publishedAt": "2026-07-29",
+      "loadedAt": "2026-07-29",
+      "title": "July 2026 Pipeline and Backend Normalization Update",
+      "summary": "Updated the Phenobase loading pipeline and production backend index to use the current field definitions and normalized display values. This release does not add new data sources; it standardizes how existing records are loaded, exported, and rendered from the backend.",
+      "methodology": [
+        "Applied targeted Elasticsearch backfills against the production Phenobase index to normalize backend values without introducing new source datasets.",
+        "Updated the loader, CSV export, and backfill helpers so future loads produce the same normalized field names and values used in the data field definitions.",
+        "Validated backend aggregate counts after the updates and kept source-specific loader transforms in sync with the updated field conventions.",
+        "Ran the phenobase_data unit test suite after the pipeline changes to confirm field renaming, export, source URL, NPN/NEON verbatim trait, and Zenodo package behavior."
+      ],
+      "changes": [
+        "Normalized collectionMethod values in the backend to human observation, herbarium specimen image, and live plant image.",
+        "Normalized annotationMethod values in the backend to human and machine, replacing the legacy in_situ value.",
+        "Standardized NPN and NEON verbatimTrait values to use Phrase=0 or Phrase=1 instead of the previous parenthesized status format.",
+        "Updated iNaturalist flower handling so flower machine annotations map to the PPO open flower present trait and render verbatimTrait as open flowers.",
+        "Expanded field rename and export support for version 2 fields, including standardizedFamily, collectionMethod, annotationMethod, sourceRecordUrl, recordedBy, and accuracyFamily.",
+        "Improved standardizedFamily derivation and backfill behavior using GBIF family resolution with source-family fallbacks where authoritative lookup is unavailable.",
+        "Added or updated backend helpers to derive sourceRecordUrl values for NPN/NEON records and to preserve source links consistently in downloads.",
+        "Updated Zenodo package generation to use download-visible fields from the current column definitions and to support sampled per-datasource review packages."
+      ],
+      "notes": [
+        "This entry documents pipeline and backend database normalization work rather than a new source harvest.",
+        "The production index was updated in place so existing records render with the current field-definition vocabulary.",
+        "Open data-model questions remain for taxonRank on iNaturalist and Herbarium records, source-derived organismID/locationID for iNaturalist, and final Herbarium flower trait/verbatimTrait wording."
+      ]
+    },
+    {
       "datasetVersion": "2026.05.18",
       "publishedAt": "2026-05-18",
       "harvestedAt": "2026-05-18",
