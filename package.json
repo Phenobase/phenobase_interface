@@ -23,8 +23,8 @@
   "homepage": "https://github.com/futres/futres-data-interface#readme",
   "keywords": [],
   "devDependencies": {
-    "del": "^7.1.0",
-    "rimraf": "^5.0.7",
+    "del": "^8.0.1",
+    "rimraf": "^6.1.3",
     "url": "^0.11.3"
   }
 }
