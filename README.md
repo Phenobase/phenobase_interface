@@ -57,6 +57,9 @@ npx gulp build
 ```
 
 Notes:
+- `gulp` and `gulp build` try to regenerate `app/source-citations-data.js` from `../phenobase_data` before copying `app/` into `public/`.
+- Set `PHENOBASE_DATA_DIR=/path/to/phenobase_data` if the data repo is not a sibling directory.
+- Set `PHENOBASE_SKIP_CITATION_SYNC=1` to skip citation regeneration and use the checked-in generated file.
 - `gulp build` expects `app/trait-viz/lib/*` to exist.
 - Any static host can serve the generated `public/` directory.
 
@@ -146,6 +149,12 @@ Internally the UI now queries the indexed `decadeStart` field instead of dynamic
 
 - Download uses the current shared query converted to Lucene syntax
 - The UI can download up to `100,000` matching records
+- Download ZIP files include datasource-specific citation text for each `dataSource` represented in the returned rows:
+  - `CITATION.md`
+  - `source_citations.csv`
+  - `citation_and_data_use_policies.txt`
+- Citation content is generated from `phenobase_data/data/datasource.csv` into
+  `app/source-citations-data.js`; do not edit the generated interface file directly.
 - A confirmation dialog warns about:
   - citation / data-use policy
   - exact-match scientific-name behavior in downloads
@@ -408,10 +417,17 @@ After inserting or updating records in the datastore, update these frontend-faci
    node -e "JSON.parse(require('fs').readFileSync('app/global-stats-snapshot.json','utf8')); console.log('global-stats-snapshot.json ok')"
    ```
 
-5. Commit and deploy the updated frontend files.
+5. If source citation metadata changed, regenerate the checked-in citation artifact from `phenobase_data`:
+
+   ```bash
+   npx gulp syncCitationData
+   ```
+
+6. Commit and deploy the updated frontend files.
    At minimum this usually means:
    - `app/data-release-history.json`
    - `app/global-stats-snapshot.json`
+   - `app/source-citations-data.js` when citation metadata changed
 
 If you skip these steps, the live query API may have the new records, but the default landing-page summary and release-history section can lag behind the actual datastore contents.
 

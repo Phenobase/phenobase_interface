@@ -249,7 +249,7 @@
       <i class="fas fa-robot"></i>
     </div>
     <p>This service will initiate a download of up to 100,000 records from the Phenobase database.</p>
-    <p>The ZIP includes data.csv, citation notes, and a README.</p>
+    <p>The ZIP includes data.csv, CITATION.md, source_citations.csv, citation notes, and a README.</p>
     <p>The CSV includes the curated Phenobase export fields. The sourceRecordUrl column is included even when some rows have blank values.</p>
     <p>Downloads use the same active filters shown in the interface.</p>
     <div id="absentDownloadWarning" class="alert alert-warning" role="alert" style="display:none;">
@@ -282,6 +282,8 @@
   <script src="app.stats.js"></script>
   <script src="app.traits.js"></script>
   <script src="app.facets.js"></script>
+  <script src="source-citations-data.js"></script>
+  <script src="source-citations.js"></script>
 
 
 
@@ -841,6 +843,8 @@
           "The following contains information about your download from the Global Plant Phenology Database.",
           "",
           "data file = data.csv",
+          "citation file = CITATION.md",
+          "source citation table = source_citations.csv",
           `date query ran = ${new Date().toString()}`,
           `query = ${JSON.stringify(query)}`,
           "fields returned = curated Phenobase export fields",
@@ -860,16 +864,6 @@
         return lines.join("\n");
       }
 
-      function buildCitationText() {
-        return [
-          "Citation and data use policy",
-          "",
-          "Use of these data should cite Phenobase and the contributing source datasets represented in the download.",
-          "Review source-specific licensing and citation requirements before redistribution or publication.",
-          "",
-        ].join("\n");
-      }
-
       async function createBrowserDownloadZip(signal) {
         const query = getDownloadQuery();
         const limit = CLIENT_DOWNLOAD_LIMIT;
@@ -877,6 +871,8 @@
         const { records, totalPossible } = await fetchDownloadRecords(query, limit, signal);
         setDownloadStatus("Writing CSV", "Formatting records and deriving missing NPN source record URLs.", { percent: 76, phase: "writing" });
         const enrichedRecords = records.map(enrichDownloadRecord);
+        const accessDate = new Date();
+        const dataSourceCounts = window.PhenobaseSourceCitations.sourceCountsFromRecords(enrichedRecords);
         const csvResult = csvFromRecords(enrichedRecords, fields);
         const sourceRecordUrlRows = rowsWithValue(enrichedRecords.map(projectExportRecord), "sourceRecordUrl");
         const readme = buildDownloadReadme({
@@ -891,7 +887,9 @@
         setDownloadStatus("Packaging ZIP", "Creating data.csv, README, and citation notes in your browser.", { percent: 88, phase: "packaging" });
         return createZipBlob([
           { name: "README.txt", data: readme },
-          { name: "citation_and_data_use_policies.txt", data: buildCitationText() },
+          { name: "CITATION.md", data: window.PhenobaseSourceCitations.citationMarkdown(dataSourceCounts, accessDate) },
+          { name: "source_citations.csv", data: window.PhenobaseSourceCitations.sourceCitationsCsv(dataSourceCounts, accessDate, escapeCsvValue) },
+          { name: "citation_and_data_use_policies.txt", data: window.PhenobaseSourceCitations.citationAndPoliciesText(dataSourceCounts, accessDate) },
           { name: "data.csv", data: csvResult.csv },
         ]);
       }
